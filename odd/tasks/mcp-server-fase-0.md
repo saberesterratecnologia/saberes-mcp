@@ -33,15 +33,16 @@ cliente `mcp-secretaria-academica` (id 14) ya dado de alta en producción.
 
 ## Tareas
 
-- [ ] **T1 — Scaffolding del repo**
-  `git init`, `package.json`, `tsconfig.json`, `.gitignore` (node_modules, dist, .env),
-  SDK oficial de MCP. Mover los dos `.md` existentes al repo.
-  Cierre: `npm run build` limpio.
+- [x] **T1 — Scaffolding del repo** — commit `8d8e4e3` (main)
+  `git init`, `package.json`, `tsconfig.json`, `.gitignore`, SDK oficial de MCP.
+  Remoto: `github.com/saberesterratecnologia/saberes-mcp` (privado, sin pushear aún).
+  `.env.example` quedó afuera (la herramienta de escritura bloquea esa ruta); las dos
+  variables están documentadas en el README.
 
-- [ ] **T2 — Cliente HTTP de la API Saberes**
-  Módulo aislado con las cuatro reglas de arriba. Token por variable de entorno, nunca
-  hardcodeado. Errores tipados por status code.
-  Cierre: tests del mapeo de errores + una llamada real a `recuperar_cursos_disponibles`.
+- [x] **T2 — Cliente HTTP de la API Saberes** — commit `cdb2140` (rama `feat/listar-cursos`)
+  `src/saberes-client.ts` + 9 tests con fetch inyectado, todos en verde.
+  Verificado contra producción: 14 cursos de las dos organizaciones,
+  `403 → action_not_allowed`, token inválido `→ 302 → authentication_failed`.
 
 - [ ] **T3 — Tool `listar_cursos`**
   Capa anticorrupción: traduce el RPC a una respuesta conversacional. Mapea la
@@ -61,6 +62,9 @@ cliente `mcp-secretaria-academica` (id 14) ya dado de alta en producción.
 
 ## Bitácora
 
+- **2026-09-18** — T1 y T2 cerrados. El `git init` rompió el registro de worktree de los
+  subagentes (la sesión arrancó cuando el directorio no era repo), así que T2 se
+  implementó inline en vez de delegarse a un writer.
 - **2026-09-18** — Cliente `mcp-secretaria-academica` dado de alta en prod (`id_servicio_api = 14`),
   token generado y verificado. Smoke test: 200 en la acción permitida, 403 en las prohibidas.
   Descubierto que solo el camino feliz devuelve JSON (`existingResponse="Replace"` en Web.config).
