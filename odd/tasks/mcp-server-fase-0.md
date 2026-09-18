@@ -49,16 +49,24 @@ cliente `mcp-secretaria-academica` (id 14) ya dado de alta en producción.
   capitalización mixta (`id_curso` / `Curso` / `Organizacion`) a nombres limpios.
   Cierre: servidor stdio levanta y responde `tools/list` y `tools/call`.
 
-- [ ] **T4 — Instalar Claude Desktop y registrar el conector**
-  `claude_desktop_config.json` apuntando al servidor. Validar la conversación real.
-  Cierre: el agente responde una consulta de cursos usando la tool.
+- [x] **T4 — Instalar Claude Desktop y registrar el conector** — validado 18/09 21:01
+  El agente respondió con los 14 cursos agrupados por organización.
+  ⚠️ Claude Desktop instalado por **MSIX (Microsoft Store)**: el config real vive en
+  `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\`, no en `%APPDATA%\Claude`.
+  Los logs sí quedan en `%LOCALAPPDATA%\Claude\logs\`.
 
-- [ ] **T5 — Actualizar los documentos de diseño**
-  `DISENO-TOOLS-MCP.md` y `PROPUESTA-AGENTES-IA.md` con los hallazgos del 18/09:
-  `mesa_ayuda_bot` → `prometheo_bot`; token regenerable; sin scope por organización,
-  sin vencimiento, sin rate limit, sin auditoría; contrato de errores roto.
+- [x] **T5 — Actualizar los documentos de diseño**
+  `DISENO-TOOLS-MCP.md` v1.0 → **v1.1** y `PROPUESTA-AGENTES-IA.md` v2.3 → **v2.4**.
+  Decisión de Max: **no** documentar el renombre del cliente del bot.
 
 ---
+
+## Resultado
+
+**Fase 0 cerrada el 18/09/2026.** Los cinco supuestos quedaron validados contra producción:
+autenticación por token, lista blanca efectivamente acotada, registro del conector, flujo MCP
+completo y traducción a lenguaje natural. Lo que queda de Fase 1 es repetir el patrón para las
+otras tres tools y montar la infraestructura.
 
 ## Bitácora
 

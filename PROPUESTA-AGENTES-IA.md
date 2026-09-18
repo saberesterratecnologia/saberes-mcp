@@ -1,8 +1,8 @@
 # Propuesta: Integración de Agentes de IA en la Organización
 
 **Fecha:** Septiembre 2026
-**Estado:** Propuesta de viabilidad — revisada contra el código del CRM y verificada contra el servidor de producción
-**Versión:** 2.3
+**Estado:** Propuesta de viabilidad — **Fase 0 ejecutada y validada en producción**
+**Versión:** 2.4
 **Revisión de protocolo MCP:** 2026-07-28
 **Área piloto definida:** Secretaría Académica
 
@@ -11,6 +11,22 @@
 ## Cambios respecto de versiones anteriores
 
 La v1.5 se escribió en julio de 2026 sin relevar el código de Saberes-Terra. Esta revisión corrige el documento contra dos fuentes: el estado real del ecosistema MCP a septiembre de 2026, y un relevamiento directo del repositorio del CRM.
+
+### Correcciones de la v2.4 — el spike de Fase 0 se ejecutó (18/09/2026)
+
+**La propuesta deja de ser teórica.** El MCP Server existe, está conectado a producción y un agente respondió una consulta real.
+
+| # | Hallazgo | Consecuencia |
+|---|---|---|
+| G | ✅ **El circuito completo funciona.** `listar_cursos` devolvió los 14 cursos de las dos organizaciones desde Claude Desktop | El supuesto central de la propuesta está **validado**, no asumido |
+| H | **El contrato de errores de la API está roto**: solo el `200` devuelve JSON, todos los errores devuelven HTML. El `401` llega como `302` al login | El cliente rutea por status code y **no sigue redirects**. No bloquea, pero hay que saberlo |
+| I | `SERVICIOS_API` **no tiene** scope por organización, vencimiento, IP permitidas, rate limit ni auditoría | `acciones_permitidas` es el **único** mínimo privilegio → confirma **un cliente por área** |
+| J | El token **es regenerable** (invalidando el anterior), no de un solo uso irrecuperable | Perder el token no obliga a crear otro cliente |
+| K | No hay evidencia de consumo: `ultimo_evento_at` no lo escribe la API RPC | La **auditoría la debe hacer el MCP Server**, como ya prevé la propuesta |
+
+> **Corrección al hallazgo E de la v2.3.** Decía "no hace falta SQL manual". En la práctica el patrón del CRM es el contrario: la fila se crea con un **script SQL versionado** y solo la **generación del token** pasa por la pantalla de sysadmin. El script versionado importa porque la tabla no audita altas.
+>
+> **Lección de método:** varias de estas correcciones surgieron de **medir contra producción**, no de leer el código. El código dice la intención; la configuración dice lo que pasa.
 
 ### Correcciones de la v2.3 — contrato real de las acciones de la API
 
@@ -979,14 +995,34 @@ La organización paga hoy ChatGPT Plus ($20) + Claude Max ($100) = **$120 USD/me
 ### Fase 0 — Verificación y fundaciones (Semana 1)
 
 - [x] ~~Determinar el sistema operativo real del servidor~~ — **hecho el 14/09/2026**: Windows Server 2012 R2, sin ESU. Ver [Riesgos](#riesgos-y-mitigaciones)
+- [x] ~~Dar de alta el primer cliente `SERVICIO_API` con lista blanca de lectura~~ — **hecho el 18/09/2026**: `mcp-secretaria-academica`, `id_servicio_api = 14`, 4 acciones de lectura
+- [x] ~~**Spike técnico:** MCP Server mínimo validado de punta a punta contra la app de chat~~ — **hecho el 18/09/2026**
+- [x] ~~Definir el área piloto~~ — Secretaría Académica
 - [ ] **Escalar a dirección el estado de parcheo del servidor**, como tema independiente de este proyecto
-- [ ] **Spike técnico:** MCP Server mínimo con una tool que envuelva `recuperar_comision_x_id`, validado de punta a punta contra la app de chat elegida
-- [ ] Verificar la inconsistencia documental de `api_saberes.vb:1838-1853` con una prueba controlada
+- [ ] Decisión de dirección: ¿se aprueba que PII de estudiantes atraviese un modelo de terceros?
 - [ ] Contratar el VPS Linux y configurar nginx + certificados
-- [ ] Dar de alta el primer cliente `SERVICIO_API` con lista blanca de lectura
-- [ ] Definir el área piloto
 
 > El spike va primero porque valida los supuestos de autenticación y de soporte de la app antes de comprometer semanas de desarrollo. Si algo no funciona como esperamos, queremos saberlo en la semana 1.
+
+#### ✅ Resultado del spike — 18/09/2026
+
+Se implementó la tool más simple (`listar_cursos`, sin parámetros y sin PII) en vez de `recuperar_comision_x_id`, porque valida exactamente el mismo circuito con menos superficie.
+
+**Consulta real en Claude Desktop:** *"¿Qué cursos hay disponibles?"* → el agente devolvió los **14 cursos** agrupados en Instituto Terra (11) y Fundación Saberes (3), en lenguaje natural, y ofreció el siguiente paso.
+
+| Supuesto a validar | Resultado |
+|---|---|
+| Autenticación por `X-Api-Token` contra producción | ✅ |
+| Lista blanca por cliente efectivamente acotada | ✅ `403` en las acciones excluidas |
+| Registro del conector en la app de chat | ✅ |
+| Flujo MCP completo (`initialize`, `tools/list`, `tools/call`) | ✅ |
+| La traducción produce lenguaje natural, no JSON | ✅ |
+
+**Lo que costaba semanas de riesgo y ahora está resuelto:** ya sabemos que la arquitectura cierra. Lo que queda de la Fase 1 es **repetir el patrón** para las otras tres tools y montar la infraestructura.
+
+Implementación: `github.com/saberesterratecnologia/saberes-mcp` (privado), TypeScript sobre el SDK oficial de MCP.
+
+> ⚠️ El spike corrió con transporte **stdio local**. El paso a producción multiusuario requiere el VPS con HTTPS. Y si el equipo usara ChatGPT en vez de Claude, **stdio no es una opción**: ChatGPT solo acepta conectores remotos por HTTPS, o sea que el VPS y OAuth dejan de ser el paso siguiente para ser el paso previo.
 
 ### Fase 1 — Piloto de lectura (Semanas 2–5)
 

@@ -1,12 +1,20 @@
 # Diseño de Tools — MCP Server Saberes
 
-**Versión:** 1.0
+**Versión:** 1.1
 **Fecha:** Septiembre 2026
 **Alcance:** Fase 1 — Secretaría Académica, solo lectura
 **Revisión de protocolo MCP:** 2026-07-28
 **Documento padre:** `PROPUESTA-AGENTES-IA.md` v2.3
 
 Artefacto de implementación. Define el contrato exacto de las cuatro tools de la Fase 1, su mapeo a las acciones de `POST /api`, las reglas de traducción y el manejo de errores.
+
+> **Cambios de la v1.1 (18/09/2026).** El cliente fue dado de alta en producción y el spike de Fase 0 se ejecutó de punta a punta. Lo medido contra producción corrigió tres cosas que la v1.0 daba por buenas leyendo el código:
+>
+> 1. **El contrato de errores está roto.** Solo el `200` devuelve JSON; todos los errores devuelven HTML. Ver sección 3.
+> 2. **El token es regenerable**, no de un solo uso irrecuperable.
+> 3. `SERVICIOS_API` **no tiene** scope por organización, vencimiento, IP permitidas, rate limit ni auditoría.
+>
+> Lección de método: **el código dice la intención, la configuración dice lo que pasa.** Medir contra producción antes de escribir el contrato.
 
 ---
 
@@ -33,10 +41,20 @@ Alta desde `sysadmin → Sistema → Servicios API` (`~/modulos/sysadmin/servici
 
 | Campo | Valor |
 |---|---|
+| `id_servicio_api` | **`14`** (asignado en el alta del 18/09/2026) |
 | `codigo` | `mcp-secretaria-academica` (UNIQUE, inmutable — es la identidad estable) |
-| `nombre` | `MCP Server — Secretaría Académica` |
-| `tipo` | `interno` |
+| `nombre` | `MCP Server - Secretaría Académica` |
+| `tipo` | **`externo`** |
+| `activo` | `1` |
 | `acciones_permitidas` | ver abajo |
+
+> **Corrección de la v1.0:** el `tipo` correcto es **`externo`**, no `interno`. Todos los clientes que se autentican con token son `externo`; `interno` está reservado para servicios que se invocan por ruta dentro del propio sitio. La UI trae `Interno` por defecto, así que hay que cambiarlo a mano.
+
+**Alta efectiva:** el cliente se creó con un script SQL versionado (`sql/2026-09-18_servicio_api_mcp_secretaria_academica.sql` en el repo del CRM) y **solo la generación del token pasó por la UI de sysadmin**. Ese es el patrón del proyecto, no el formulario completo.
+
+**Lo que esta tabla NO tiene, y conviene saber antes de diseñar:** `SERVICIOS_API` no tiene `id_organizacion`, ni scope, ni fecha de vencimiento, ni IP permitidas, ni rate limit, ni contador de uso, ni auditoría de altas. **El modelo de autorización completo es: token válido + acción en la lista.** Por eso `acciones_permitidas` es el único mecanismo de mínimo privilegio que existe, y por eso se da de alta **un cliente por área** en vez de uno solo con la unión de todos los permisos: es la única forma de poder revocar un área sin voltear a las demás.
+
+> ⚠️ `ultimo_evento_at` **no sirve como evidencia de consumo.** Solo lo escriben los dos servicios de sync de Moodle; `api_saberes.vb` nunca llama a `actualizar_ultimo_evento`. El campo va a quedar en `NULL` por más llamadas que haga el MCP.
 
 **Valor literal de `acciones_permitidas`:**
 
@@ -46,7 +64,11 @@ recuperar_cursos_disponibles,recuperar_comisiones_disponibles,recuperar_comision
 
 Reglas del campo (`Negocio/ServiciosApiAccesoDatos.vb:318-330`): separador coma únicamente, `.Trim()` en ambos lados, comparación `OrdinalIgnoreCase`, **sin wildcard**, campo vacío deniega todo.
 
-> ⚠️ **El token se muestra una sola vez** al generarlo. En la base queda cifrado con `Simple3Des` usando `CONFIGURACIONES_GLOBALES.api_token_encrypt_key`. Si esa clave se pierde, **todos** los tokens existentes deben regenerarse.
+> ⚠️ **El token se muestra una sola vez por generación**, pero **es regenerable**: `generar_token_cliente()` se puede reinvocar y hace `UPDATE` de `token_cifrado`. Regenerar **invalida el anterior en el acto** — no hay historial ni doble token activo — así que hacerlo sobre un cliente en uso lo tira a 401. Si el token se pierde, **no** hay que crear otro cliente: se regenera.
+>
+> En la base queda cifrado con `Simple3Des` usando `CONFIGURACIONES_GLOBALES.api_token_encrypt_key`. Si esa clave se pierde, **todos** los tokens existentes deben regenerarse. La clave es **por entorno**: un token generado en local no sirve en producción y viceversa.
+>
+> El grid de sysadmin muestra una columna `Token` con `Configurado` / `Sin configurar`, calculada en el `SELECT`. Sirve para verificar el alta **sin volver a generar** y invalidar por accidente. El token cifrado nunca vuelve a la UI: ni un admin puede verlo de nuevo.
 
 ### Transporte hacia el CRM
 
@@ -115,20 +137,47 @@ Toda tool que pueda devolver una colección declara `max_resultados`. Si el conj
 
 ## 3. Manejo de errores
 
-### Errores comunes de la API
+### 🔴 La regla que manda: solo el `200` devuelve JSON
 
-Devueltos por `ValidarClienteApi` (`api_saberes.vb:506-541`):
+**Medido contra producción el 18/09/2026.** El handler de la aplicación escribe un cuerpo JSON correcto en cada error, pero **la configuración de IIS lo descarta**: `ConIgCba/Web.config` usa `<httpErrors errorMode="Custom" existingResponse="Replace">`, y `Replace` **le gana** a `TrySkipIisCustomErrors`. Además el `401` está mapeado a `/401.aspx`, que vuelve a setear `401` sin la supresión, y ahí forms auth lo convierte en un `302` al login.
 
-| HTTP | `message` literal | Traducción a MCP |
+Lo que realmente devuelve la API:
+
+| Caso | HTTP real | Content-Type real |
 |---|---|---|
-| 401 | `Token inválido.` | Error de servidor. **No exponer al modelo.** Loguear y devolver "servicio no disponible" |
-| 403 | `Acción no permitida para este cliente.` | Ídem. Indica lista blanca mal configurada |
-| 500 | `Endpoint no configurado. Generar token desde sysadmin.` | Ídem |
-| 400 | `Acción inválida` / `Acción no reconocida` | Bug del MCP Server. Loguear como error crítico |
-| 400 | `Request inválido.` | Ídem |
-| 500 | `Error interno` | "El sistema no pudo procesar la consulta." |
+| Acción permitida, token válido | **200** | `application/json` ✅ |
+| Sin header `X-Api-Token` | **302** | `text/html` (redirect al login) |
+| Token inválido o cliente inactivo | **302** | `text/html` |
+| Acción fuera de la lista blanca | **403** | `text/html` (página de IIS) |
+| JSON malformado / sin `action` / acción inexistente | **400** | `text/html` |
+| Verbo distinto de POST | **405** | `text/html` |
+| Fallo interno | **500** | `text/html` |
 
-> **Regla:** los errores 401/403/500 son fallas de configuración del MCP Server, no información útil para el usuario. Nunca filtrar esos mensajes al contexto del modelo — el usuario no puede hacer nada con "Token inválido", y el modelo podría intentar "arreglarlo" reintentando.
+**Reglas no negociables del cliente HTTP:**
+
+1. **Rutear por status code, nunca por el body.** Parsear JSON **solo** con `200`.
+2. **No seguir redirects.** `redirect: "manual"` en `fetch`, sin `-L` en curl, `allow_redirects=False` en requests. Si se siguen, la llamada termina en `200` con el HTML del login y **parece éxito**. Es el modo de falla más peligroso de esta integración.
+3. **No confiar en `Content-Type`** para decidir nada.
+4. Un `200` cuyo cuerpo no parsea como JSON es **su propio error**, no un éxito ni un error de red.
+
+> **Por qué nadie lo notó antes:** ningún consumidor ejercita el camino de error. Los consumidores internos de `/api` van con cookie de sesión y hacen `r.json()` asumiendo JSON siempre — si les llega HTML, el parseo revienta y la promesa se rechaza **en silencio**. El bot solo pide acciones de su lista, así que nunca ve un 401 ni un 403.
+>
+> **Esto no se va a arreglar.** El arreglo sería un `<location path="api">` con `existingResponse="PassThrough"`, pero toca el `Web.config` de producción y cambia el contrato para todos los consumidores. Decisión tomada: el MCP rutea por status code. De todos modos es lo correcto aun con la API arreglada.
+
+### Traducción a MCP
+
+Cada caso se elige por el **status code**, nunca por texto del mensaje:
+
+| HTTP real | Significado | Qué se le dice a la persona |
+|---|---|---|
+| 3xx | Token ausente, inválido o cliente inactivo | "No pude autenticarme contra Saberes. Avisale al equipo técnico" |
+| 403 | Lista blanca mal configurada | "Esta integración no tiene permiso para esta consulta" |
+| 400 | Bug del MCP Server | "El sistema respondió de una forma que no pude interpretar". Loguear como error crítico |
+| 405 | Bug del MCP Server | Ídem |
+| 500 | Fallo interno del CRM | "El sistema no pudo procesar la consulta". Queda en la tabla `EXCEPCIONES` |
+| timeout / red | Infraestructura | "No respondió a tiempo, probá de nuevo" — es el único caso que la persona puede reintentar |
+
+> **Regla:** el texto interno del error **nunca** llega al contexto del modelo. El usuario no puede hacer nada con "Token inválido", y el modelo podría intentar "arreglarlo" reintentando. Pero sí hay que **distinguir** los casos: autenticación, permisos, timeout y caída son problemas distintos y no deben leerse igual — uno lo resuelve el equipo técnico, otro se resuelve esperando.
 
 ### La regla crítica: "no encontrado" es HTTP 200
 
@@ -614,10 +663,10 @@ En Fase 1 el campo `conector` identifica el **área**. En Fase 2, con identidad 
 
 | # | Paso | Depende de |
 |---|---|---|
-| 1 | Cliente `SERVICIO_API` dado de alta con la lista blanca | — |
-| 2 | Cliente HTTP hacia `/api` con `X-Api-Token`, timeout y reintentos | 1 |
+| 1 | ~~Cliente `SERVICIO_API` dado de alta con la lista blanca~~ ✅ **hecho** (`id 14`, 18/09) | — |
+| 2 | ~~Cliente HTTP hacia `/api` con `X-Api-Token`, timeout y reintentos~~ ✅ **hecho** | 1 |
 | 3 | Capa de traducción: R1–R6 como funciones reutilizables | 2 |
-| 4 | `listar_cursos` — la más simple, valida el circuito completo | 3 |
+| 4 | ~~`listar_cursos` — la más simple, valida el circuito completo~~ ✅ **hecho** | 3 |
 | 5 | Índice cacheado con refresco en background | 3 |
 | 6 | `buscar_comision` sobre el índice | 5 |
 | 7 | `detalle_comision` | 3 |
@@ -627,6 +676,22 @@ En Fase 1 el campo `conector` identifica el **área**. En Fase 2, con identidad 
 
 > El paso 4 es el spike de Fase 0: con `listar_cursos` andando de punta a punta contra la app de chat, están validados el transporte, la autenticación, el registro del conector y el flujo MCP completo. Todo lo demás es repetir el patrón.
 
+> ✅ **Spike de Fase 0 cerrado el 18/09/2026.** `listar_cursos` respondió en Claude Desktop con los 14 cursos agrupados por organización. Transporte, `X-Api-Token`, registro del conector y flujo MCP completo: validados. Implementación en `github.com/saberesterratecnologia/saberes-mcp` (TypeScript / Node 22+, SDK oficial, stdio).
+
+### Nota de instalación — Claude Desktop desde Microsoft Store
+
+Si la app se instaló como paquete MSIX (Microsoft Store), el sistema de archivos está **redirigido** y `claude_desktop_config.json` **no se lee** de `%APPDATA%\Claude`. La ruta real es:
+
+```
+%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\claude_desktop_config.json
+```
+
+Los logs, en cambio, **sí** quedan en `%LOCALAPPDATA%\Claude\logs\` (`mcp.log` y `mcp-server-<nombre>.log`). Asimetría confusa: config adentro del sandbox, logs afuera.
+
+Síntoma de que el config no se está leyendo: `mcp.log` en 0 bytes y la línea `[localMcpBridge] no stdio servers connected` en `main.log`.
+
+⚠️ Las sesiones con **carpeta de proyecto / modo Code** no consumen los conectores de ese archivo. El spike se valida en un **chat normal**.
+
 ### Verificaciones antes de publicar el conector
 
 - [ ] `acciones_permitidas` contiene **exactamente** las cuatro acciones, sin espacios ni acciones de más
@@ -635,10 +700,13 @@ En Fase 1 el campo `conector` identifica el **área**. En Fase 2, con identidad 
 - [ ] `buscar_comision` no llama a la API en ningún camino de ejecución
 - [ ] `estado_de_persona` desambigua correctamente comisión inexistente vs. persona no inscripta
 - [ ] Los errores 401/403/500 no llegan al contexto del modelo
+- [ ] **El cliente HTTP no sigue redirects** (`redirect: "manual"`), y hay un test que lo asserta
+- [ ] El éxito se decide **solo** por `status === 200`; ningún camino mira el body para eso
+- [ ] El token no aparece en el `message`, el `stack` ni la serialización de ningún error, y hay un test que lo asserta
 - [ ] Todas las tools tienen timeout y `max_resultados`
 - [ ] `tools/list` declara `cacheScope: "private"`
 - [ ] La auditoría registra las cuatro tools, incluidos los casos de error
-- [ ] Ninguna tool detecta "no encontrado" mirando el status HTTP
+- [ ] Ninguna tool detecta "no encontrado" mirando el status HTTP — eso se decide **dentro** de un `200`, mirando `result` y `data`
 - [ ] Si se agregó una tool sobre una acción fuera de las cuatro originales, **se verificó su handler**: el patrón de "200 para no encontrado" no es universal en la API
 
 ---
@@ -656,7 +724,11 @@ Los que muerden si no se conocen:
 | 5 | Header es `X-Api-Token`, **no** `Authorization: Bearer` | 401 permanente |
 | 6 | Solo **POST**; cualquier otro verbo da 405 | — |
 | 7 | `acciones_permitidas` **sin wildcard**; campo vacío deniega todo | Falla cerrada, es lo correcto |
-| 8 | El token se muestra **una sola vez** al generarlo | Hay que regenerarlo si se pierde |
+| 8 | El token se muestra una sola vez **por generación**, pero es regenerable — y regenerar invalida el anterior en el acto | Regenerar un cliente en uso lo tira a 401 |
+| 11 | **Solo el `200` devuelve JSON. Todos los errores devuelven HTML** (`existingResponse="Replace"` en Web.config) | Detección de errores rota si se mira el body |
+| 12 | El `401` llega como **`302` al login**, no como 401 | Si el cliente sigue redirects, termina en 200 con HTML de login y **parece éxito** |
+| 13 | `SERVICIOS_API` no tiene scope por organización, vencimiento, IP, rate limit ni auditoría | `acciones_permitidas` es el único mínimo privilegio |
+| 14 | `ultimo_evento_at` no lo escribe la API RPC | No sirve como evidencia de consumo |
 | 9 | Nombres de campo con **tildes y guiones bajos** | Acceso por corchetes en JS |
 | 10 | `WriteJson` aplica `Trim()` a todos los strings | Comportamiento esperado, no sorpresa |
 
