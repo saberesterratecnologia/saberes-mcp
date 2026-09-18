@@ -1,0 +1,15 @@
+# Local Pi runtime state
+.atl/
+
+# Dependencies and build output
+node_modules/
+dist/
+
+# Local secrets
+.env
+*.token
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
