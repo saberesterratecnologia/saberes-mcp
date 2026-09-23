@@ -41,3 +41,5 @@ riesgo explícitamente aceptado por Max el 23/09/2026.
   que el conector remoto necesita **recibir** HTTPS desde internet. Reescrita en las dos tablas
   y en la regla de diseño del riesgo 7: MCP escucha solo en `127.0.0.1`, publicado como ruta
   del nginx existente, sin puerto nuevo, con autenticación obligatoria.
+
+- **2026-09-23** — Commit `180a306`. Revisión nativa `review-f906f0c9766110b4`: riesgo bajo (solo docs), aprobada y cerrada.
