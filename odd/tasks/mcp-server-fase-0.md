@@ -6,7 +6,7 @@ cliente `mcp-secretaria-academica` (id 14) ya dado de alta en producción.
 
 **Runtime**: TypeScript / Node 24.18
 **Alcance elegido**: flujo completo, incluyendo instalar Claude Desktop y registrar el conector.
-**Repo**: `saberes-mcp` (privado, cuenta propia de Max) — pendiente de creación por Max.
+**Repo**: `github.com/saberesterratecnologia/saberes-mcp` (privado).
 
 ---
 
@@ -35,7 +35,7 @@ cliente `mcp-secretaria-academica` (id 14) ya dado de alta en producción.
 
 - [x] **T1 — Scaffolding del repo** — commit `8d8e4e3` (main)
   `git init`, `package.json`, `tsconfig.json`, `.gitignore`, SDK oficial de MCP.
-  Remoto: `github.com/saberesterratecnologia/saberes-mcp` (privado, sin pushear aún).
+  Remoto: `github.com/saberesterratecnologia/saberes-mcp` (privado). Pusheado el 18/09.
   `.env.example` quedó afuera (la herramienta de escritura bloquea esa ruta); las dos
   variables están documentadas en el README.
 
@@ -44,10 +44,11 @@ cliente `mcp-secretaria-academica` (id 14) ya dado de alta en producción.
   Verificado contra producción: 14 cursos de las dos organizaciones,
   `403 → action_not_allowed`, token inválido `→ 302 → authentication_failed`.
 
-- [ ] **T3 — Tool `listar_cursos`**
+- [x] **T3 — Tool `listar_cursos`** — commit `fbd5f0f` (rama `feat/listar-cursos`)
   Capa anticorrupción: traduce el RPC a una respuesta conversacional. Mapea la
   capitalización mixta (`id_curso` / `Curso` / `Organizacion`) a nombres limpios.
-  Cierre: servidor stdio levanta y responde `tools/list` y `tools/call`.
+  Cierre: servidor stdio levanta y responde `tools/list` y `tools/call`. 17 tests en verde;
+  e2e con cliente MCP del SDK contra producción OK.
 
 - [x] **T4 — Instalar Claude Desktop y registrar el conector** — validado 18/09 21:01
   El agente respondió con los 14 cursos agrupados por organización.

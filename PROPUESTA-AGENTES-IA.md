@@ -1,8 +1,9 @@
 # Propuesta: Integración de Agentes de IA en la Organización
 
 **Fecha:** Septiembre 2026
+**Última actualización:** 23/09/2026
 **Estado:** Propuesta de viabilidad — **Fase 0 ejecutada y validada en producción**
-**Versión:** 2.4
+**Versión:** 2.5
 **Revisión de protocolo MCP:** 2026-07-28
 **Área piloto definida:** Secretaría Académica
 
@@ -11,6 +12,22 @@
 ## Cambios respecto de versiones anteriores
 
 La v1.5 se escribió en julio de 2026 sin relevar el código de Saberes-Terra. Esta revisión corrige el documento contra dos fuentes: el estado real del ecosistema MCP a septiembre de 2026, y un relevamiento directo del repositorio del CRM.
+
+### Correcciones de la v2.5 — el MCP Server va en el VPS existente (23/09/2026)
+
+**El MCP Server se despliega en el VPS Windows de producción** (DonWeb, Windows Server 2012 R2), no en un VPS Linux aparte como planteaba la v2.4. Es una **decisión con riesgo aceptado**, tomada por **Max el 23/09/2026** y documentada como tal, no un detalle de implementación.
+
+| # | Verificación directa por SSH, solo lectura, 23/09/2026 | Consecuencia |
+|---|---|---|
+| L | ❌ **El argumento "Runtime" de la v2.4 era falso en la práctica.** El servidor ya corre **Node v20.16.0** del sistema (`C:\Program Files\nodejs`), compartido por **9 servicios Windows** instalados con node-windows, más nginx 1.28.1 como servicio vía nssm | Cae el motivo principal para contratar un VPS aparte: **Node ya corre ahí, en producción** |
+| M | **Node 24 se niega a arrancar**: *"Node.js is only supported on Windows 10, Windows Server 2016, or higher"*. **Node 22.20.0 portable sí arranca**, sin `NODE_SKIP_PLATFORM_CHECK`, y hace llamadas HTTPS correctamente | Runtime elegido: **Node 22 portable, exclusivo del MCP**. Node 22 LTS tiene mantenimiento hasta el **30/04/2027** |
+| N | El build de `saberes-mcp` pasó el test de punta a punta (cliente MCP → `tools/list` → `listar_cursos` → `tools/call` contra la API de producción) **con Node 20.16.0 y con Node 22.20.0** | No queda incógnita técnica sobre el runtime |
+| O | **No se toca el Node 20.16 del sistema.** Está EOL desde el 30/04/2026, pero actualizarlo pondría en riesgo los 9 servicios de producción que lo comparten | El MCP trae su propio Node portable, aislado del Node del sistema |
+| P | nginx escucha en **8443 sin TLS** (`server_name utils.institutoterra.com.ar`) ruteando a `127.0.0.1:3031`; el firewall entrante permite 80/443 | **Cómo se expone HTTPS** para el conector MCP remoto queda como **punto abierto de Fase 1** |
+| Q | Disco: **C: 3,6 GB libres de 33,6** (89,7 % ocupado) · **G: 13,9 GB libres de 37,5**. RAM libre: 4,2 GB de 8 | El MCP y sus logs de auditoría viven en **G:, nunca en C:** |
+| R | Desaparece el VPS Linux de ~$7 USD/mes | Costos recalculados: el proyecto **no agrega infraestructura** |
+
+**Lo que se acepta explícitamente:** el MCP suma una superficie expuesta a internet sobre un servidor sin parches desde 11/2023, sin aislamiento y con presión de disco, y queda atado a Node 22 hasta que el servidor migre. Ver [Dónde vive el MCP Server: decisión con riesgo aceptado](#dónde-vive-el-mcp-server-decisión-con-riesgo-aceptado) y [Riesgos](#riesgos-y-mitigaciones).
 
 ### Correcciones de la v2.4 — el spike de Fase 0 se ejecutó (18/09/2026)
 
@@ -113,10 +130,10 @@ Se propone integrar agentes de inteligencia artificial en las distintas áreas d
 
 **Alcance de la primera fase:** deliberadamente acotado. Un MCP Server con herramientas de solo lectura, autenticación máquina-a-máquina, y un área piloto. Sin capa de memoria, sin orquestador, sin operaciones de escritura, sin identidad por usuario final.
 
-**Inversión estimada:** $7 USD/mes de infraestructura nueva, más las suscripciones de chat que ya se pagan, más las horas de desarrollo interno.
+**Inversión estimada:** **$0 de infraestructura nueva** — el MCP Server corre en el VPS Windows que ya opera la organización (decisión del 23/09/2026, con riesgo aceptado) —, más las suscripciones de chat que ya se pagan, más las horas de desarrollo interno.
 
 **Dos temas que exceden esta propuesta y requieren decisión de dirección:**
-1. Determinar con certeza el sistema operativo del servidor de producción. Si es Windows Server 2012, queda sin soporte de seguridad el **13 de octubre de 2026**.
+1. **Migrar el servidor de producción.** Ya está determinado: es **Windows Server 2012 R2**, cuyo soporte terminó el **10 de octubre de 2023**, sin ESU y **sin parches de seguridad desde el 9 de noviembre de 2023**. Con la decisión del 23/09/2026 de alojar el MCP Server en esa misma máquina, la migración pasa a ser también un prerrequisito de este proyecto.
 2. Las contraseñas de usuario están almacenadas con cifrado reversible. Es un defecto de seguridad preexistente que además bloquea la evolución natural de este proyecto.
 
 Ver [Riesgos](#riesgos-y-mitigaciones).
@@ -233,7 +250,7 @@ MCP (Model Context Protocol) es un protocolo abierto que permite conectar aplica
 ```
 App de chat (ChatGPT / Claude)
     ↓ habla MCP (protocolo de IA)
-MCP Server (capa nueva, Node.js, VPS Linux)
+MCP Server (capa nueva, Node.js 22 portable, VPS Windows existente)
     ↓ habla el protocolo RPC de /api con X-Api-Token
 API Saberes (api_saberes.vb — YA EXISTE)
     ↓ habla LINQ to SQL
@@ -300,54 +317,74 @@ No adoptar en diseño nuevo: **Roots**, **Sampling**, **Logging** (`logging/setL
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────┐
-│           VPS Linux  ·  ia.nuestro-dominio.com            │
-│                                                           │
-│   ┌────────────────────────────────────────────────┐      │
-│   │            nginx — TLS · rate limiting          │      │
-│   └──────────────────────┬─────────────────────────┘      │
-│                          ▼                                │
-│   ┌────────────────────────────────────────────────┐      │
-│   │        MCP Server  ·  Node.js 22 LTS            │      │
-│   │                                                 │      │
-│   │  · Tools de lectura, paginadas y con timeout    │      │
-│   │  · Un cliente API por área (token propio)       │      │
-│   │  · Auditoría de cada invocación                 │      │
-│   │  · Stateless                                    │      │
-│   └──────────────────────┬─────────────────────────┘      │
-└──────────────────────────┼────────────────────────────────┘
-                           │
-              HTTPS + header X-Api-Token
-                   (IP del VPS permitida)
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────┐
-│     VPS Windows (DonWeb)  ·  Saberes-Terra — EXISTENTE     │
-│                                                           │
-│   ┌────────────────────────────────────────────────┐      │
-│   │   POST /api  ·  api_saberes.vb                  │      │
-│   │   · 39 acciones RPC                             │      │
-│   │   · ValidarClienteApi() por acción              │      │
-│   │   · Tabla SERVICIO_API: token + permisos        │      │
-│   └──────────────────────┬─────────────────────────┘      │
-│                          ▼                                │
-│   ┌────────────────────────────────────────────────┐      │
-│   │   SQL Server Express  ·  10 GB · 1 GB buffer    │      │
-│   └────────────────────────────────────────────────┘      │
+│   VPS Windows (DonWeb · Server 2012 R2)  ·  EXISTENTE    │
+│                                                          │
+│   ┌──────────────────────────────────────────────────┐   │
+│   │   nginx (servicio vía nssm)                      │   │
+│   │   · exposición HTTPS a definir — Fase 1          │   │
+│   └─────────────────────┬────────────────────────────┘   │
+│                         ▼                                │
+│   ┌──────────────────────────────────────────────────┐   │
+│   │   MCP Server · Node.js 22 portable (solo MCP)    │   │
+│   │   en G:  ·  servicio Windows (node-windows)      │   │
+│   │                                                  │   │
+│   │  · Tools de lectura, paginadas y con timeout     │   │
+│   │  · Un cliente API por área (token propio)        │   │
+│   │  · Auditoría de cada invocación (logs en G:)     │   │
+│   │  · Stateless                                     │   │
+│   └─────────────────────┬────────────────────────────┘   │
+│                         │                                │
+│        HTTPS + header X-Api-Token (saliente)             │
+│                         ▼                                │
+│   ┌──────────────────────────────────────────────────┐   │
+│   │   POST /api  ·  api_saberes.vb                   │   │
+│   │   · 39 acciones RPC                              │   │
+│   │   · ValidarClienteApi() por acción               │   │
+│   │   · Tabla SERVICIO_API: token + permisos         │   │
+│   └─────────────────────┬────────────────────────────┘   │
+│                         ▼                                │
+│   ┌──────────────────────────────────────────────────┐   │
+│   │   SQL Server Express  ·  10 GB · 1 GB buffer     │   │
+│   └──────────────────────────────────────────────────┘   │
+│                                                          │
+│   Ya conviviendo en la misma máquina:                    │
+│   Node 20.16 del sistema · 9 servicios · nginx           │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### Por qué el MCP Server vive en un VPS Linux aparte
+### Dónde vive el MCP Server: decisión con riesgo aceptado
 
-| Motivo | Detalle |
+**Decisión (23/09/2026, Max):** el MCP Server se despliega **en el VPS Windows de producción que ya existe**, con un **Node 22 portable exclusivo del MCP** instalado en `G:`. Esto reemplaza la arquitectura de la v2.4, que lo ponía en un VPS Linux aparte.
+
+#### Lo que argumentaba la v2.4 y lo que se verificó
+
+| Motivo de la v2.4 | Verificado por SSH el 23/09/2026 |
 |---|---|
-| **Runtime** | Node.js 18+ no soporta Windows Server 2012. Si el servidor resulta ser 2012, no hay forma de correrlo ahí con una versión soportada. |
-| **Disco** | El VPS del CRM está al 88 % de ocupación. |
-| **Aislamiento** | App y base ya comparten servidor sin aislamiento. No conviene agregar una tercera carga. |
-| **Coherencia operativa** | Los microservicios de la organización ya corren en Node bajo nginx. |
-| **Desacople** | Cuando Saberes migre de servidor, el MCP Server solo cambia la URL de su backend. |
-| **Costo** | $7 USD/mes. |
+| **Runtime** — "Node.js 18+ no soporta Windows Server 2012, no hay forma de correrlo ahí" | ❌ **Falso en la práctica.** El servidor corre **Node v20.16.0** del sistema, compartido por **9 servicios** node-windows en producción. **Node 22.20.0 portable arranca** sin flags y hace HTTPS. Solo **Node 24 se niega** a ejecutar |
+| **Disco** — "el VPS del CRM está al 88 % de ocupación" | ⚠️ **Confirmado en C:** 3,6 GB libres de 33,6 (89,7 %). Pero **G: tiene 13,9 GB libres de 37,5** → el MCP y sus logs van en G: |
+| **Aislamiento** — "no conviene agregar una tercera carga" | ⚠️ **Sigue siendo cierto y se acepta.** Ver riesgos abajo |
+| **Coherencia operativa** — "los microservicios ya corren en Node bajo nginx" | ✅ **Cierto, y juega a favor de esta decisión**: el patrón operativo (servicio Windows + nginx) ya existe en esta misma máquina |
+| **Desacople** — "cuando Saberes migre, el MCP solo cambia la URL" | ❌ **Ya no aplica.** El MCP migra **junto con** el servidor |
+| **Costo** — "$7 USD/mes" | ✅ **Desaparece.** No se agrega infraestructura |
 
-**Aclaración honesta:** poner el MCP Server aparte **no aísla la base de datos**. Las consultas siguen pegando contra el mismo SQL Express de 1 GB de buffer pool. Lo que se aísla es la carga de proceso, no la de datos. La protección real contra degradación son los límites y timeouts de las tools.
+Además: el build de `saberes-mcp` pasó el test de punta a punta (`tools/list` + `tools/call` contra la API de producción) con Node 20.16.0 **y** con Node 22.20.0.
+
+#### Riesgos aceptados
+
+| # | Riesgo aceptado | Mitigación |
+|---|---|---|
+| 1 | **SO sin parches de seguridad desde 11/2023, sin ESU.** El conector remoto necesita que el MCP **reciba** HTTPS desde internet: esa es la superficie nueva, sobre una máquina que hay que migrar | El proceso del MCP escucha **solo en `127.0.0.1`** y se publica como una **ruta nueva del nginx existente**, no como un puerto nuevo. Autenticación obligatoria en esa ruta (Fase 1: token por conector de área). Hacia el CRM solo hace llamadas salientes a `POST /api` (se **evaluará** resolverlas por localhost) |
+| 2 | **Presión de disco:** C: al 89,7 % de ocupación | MCP, dependencias, Node portable y logs de auditoría **en `G:`, nunca en C:**. Rotación y tope de tamaño de los logs de auditoría |
+| 3 | **Sin aislamiento:** aplicación + SQL Server Express + 9 servicios + MCP en una sola máquina. Si cae, cae todo | Tools con paginación, límite de resultados y timeout corto. El MCP es stateless y reiniciable. Monitoreo durante el piloto |
+| 4 | **Runtime sobre un SO que Node ya no soporta oficialmente para majors nuevos.** El MCP queda atado a **Node 22** (mantenimiento LTS hasta el 30/04/2027): **Node 24+ no arranca** en 2012 R2 | Node 22 **portable y aislado** del Node 20.16 del sistema (no se toca, para no arriesgar los 9 servicios en producción). Salir de Node 22 exige migrar el servidor |
+
+**Consecuencia que la v2.4 presentaba al revés:** la v2.4 vendía como beneficio que el MCP **no quedaba atado** al calendario de migración del servidor. Con esta decisión **sí queda atado**: el MCP migra junto con el servidor, y la migración del servidor pasa a ser prerrequisito para mover el MCP más allá de Node 22.
+
+**Aceptación explícita:** **Max, 23/09/2026.** Los cuatro riesgos de arriba se asumen a sabiendas, con la evidencia de esta sección a la vista.
+
+**Punto abierto de Fase 1:** hoy nginx escucha en **8443 sin TLS** (`utils.institutoterra.com.ar`) y el firewall entrante permite 80/443. **Cómo se expone HTTPS** para el conector MCP remoto **queda por definir**; no hay solución elegida todavía.
+
+**Aclaración honesta que ya estaba en la v2.4 y sigue valiendo:** la ubicación del MCP Server **no aísla la base de datos**. Las consultas siempre pegaron y siguen pegando contra el mismo SQL Express de 1 GB de buffer pool. La protección real contra degradación son los límites y timeouts de las tools.
 
 ### Flujo de Datos — Fase 1
 
@@ -611,7 +648,7 @@ Negocio/usuariosAccesoDatos.vb:409
 
 Es **reversible**: existe `recuperar_contraseña(id_persona)` que devuelve la clave en texto plano. No hay salt, no hay función de derivación, no hay hash.
 
-**Por qué esto bloquea el IdP:** si el IdP valida credenciales contra ese esquema, se propaga el defecto a un segundo sistema y a un VPS nuevo. La superficie de exposición crece en lugar de contenerse.
+**Por qué esto bloquea el IdP:** si el IdP valida credenciales contra ese esquema, se propaga el defecto a un segundo sistema y a una superficie nueva expuesta a internet. La superficie de exposición crece en lugar de contenerse.
 
 **Prerrequisito duro para la Fase 2:** migrar `USUARIOS.contraseña` a un hash con salt (bcrypt, PBKDF2 o Argon2). Es un cambio acotado —login, alta de usuario, cambio de clave, y una migración con doble escritura durante la transición— pero **no es gratis y debe estimarse por separado**. Meterlo escondido dentro de "integrar MCP" rompe la estimación y oculta un trabajo de seguridad que merece su propia aprobación.
 
@@ -642,25 +679,38 @@ Es **reversible**: existe `recuperar_contraseña(id_persona)` que devuelve la cl
 
 ## Configuración Inicial y Puesta en Marcha
 
-### En el VPS Linux (nuevo)
+### En el VPS Windows existente (decisión del 23/09/2026)
+
+El MCP Server se instala **en el servidor de producción que ya existe**, siguiendo el patrón de los 9 microservicios que ya corren ahí. Todo vive en **`G:`**, nunca en `C:` (3,6 GB libres).
 
 ```
-VPS Linux (Ubuntu 24.04 LTS)
-├── MCP Server Saberes (Node.js 22 LTS)
+VPS Windows (DonWeb · Server 2012 R2) — EXISTENTE
+├── G:\ ... \node-22-portable\        ← Node 22 portable, exclusivo del MCP
+│                                       (no se toca el Node 20.16 del sistema)
+├── G:\ ... \saberes-mcp\
+│   ├── MCP Server (TypeScript sobre el SDK oficial)
 │   ├── Tools de lectura por área
 │   ├── Tokens de SERVICIO_API (uno por área)
-│   └── Auditoría
-└── nginx
-    └── HTTPS (Let's Encrypt) + rate limiting
+│   └── Servicio Windows (node-windows, como los otros 9)
+├── G:\ ... \saberes-mcp\logs\        ← auditoría, con rotación y tope de tamaño
+└── nginx (ya instalado como servicio vía nssm)
+    └── exposición HTTPS del endpoint MCP → PENDIENTE (tarea de Fase 1)
 ```
 
-Un servicio y un reverse proxy. Nada más.
+Puntos a tener presentes en la instalación:
 
-### En el servidor de Saberes (existente)
+1. **Node 22 portable, no instalado en el sistema.** Actualizar el Node 20.16 del sistema pondría en riesgo los 9 servicios de producción que lo comparten. Node 22 LTS tiene mantenimiento hasta el 30/04/2027 y **Node 24+ no arranca** en 2012 R2
+2. **Nada en `C:`**: binario, dependencias y logs de auditoría van en `G:`
+3. **Logs con rotación y tope de tamaño** desde el día uno: la auditoría no puede llenar el disco
+4. **La exposición HTTPS está abierta.** Hoy nginx escucha en 8443 **sin TLS** y el firewall entrante permite 80/443. Resolverlo es una tarea de Fase 1, sin solución elegida todavía
+
+Ver [Dónde vive el MCP Server: decisión con riesgo aceptado](#dónde-vive-el-mcp-server-decisión-con-riesgo-aceptado).
+
+### En la aplicación de Saberes (existente)
 
 1. **Dar de alta los clientes API** desde sysadmin (`generar_token_cliente()`), uno por área piloto
 2. **Cargar `acciones_permitidas`** con la lista blanca de acciones de lectura de cada área
-3. **Permitir el tráfico** desde la IP del VPS Linux
+3. ~~**Permitir el tráfico** desde la IP del VPS Linux~~ — **ya no aplica.** El MCP corre en la misma máquina que la API; queda por **evaluar** si la llamada a `POST /api` se resuelve por localhost
 
 **No se modifica una sola línea de la aplicación existente.** Esto es configuración, no desarrollo.
 
@@ -928,30 +978,29 @@ No se encontró una entidad que modele comisiones de venta. Lo único cercano es
 
 | Componente | Descripción | Ubicación |
 |---|---|---|
-| **VPS Linux** | MCP Server + nginx | Hetzner, DigitalOcean o Contabo |
+| **MCP Server** | Node 22 portable + servicio Windows, en `G:` | **VPS DonWeb actual** (decisión del 23/09/2026) |
 | **Saberes-Terra** | CRM existente | VPS DonWeb actual (sin cambios) |
 | **App de chat** | Una cuenta por persona | PC de cada usuario |
 
-### Especificaciones del VPS nuevo
+**No se agrega infraestructura.** La v2.4 preveía un VPS Linux de ~$7 USD/mes; con la decisión del 23/09/2026 el MCP Server vive en el servidor que ya opera la organización. El contrapeso no es económico sino de riesgo: ver [Dónde vive el MCP Server](#dónde-vive-el-mcp-server-decisión-con-riesgo-aceptado).
 
-El recorte de alcance reduce sustancialmente los requisitos:
+### Recursos que consume el MCP en el servidor existente
 
-| Recurso | v1.5 (con Mem0 + IdP) | v2.1 (Fase 1) |
+| Recurso | Disponible hoy (verificado 23/09/2026) | Criterio |
 |---|---|---|
-| **CPU** | 4 vCPU | 2 vCPU |
-| **RAM** | 8 GB | 2 GB |
-| **Disco** | 80 GB SSD | 40 GB SSD |
-| **Sistema operativo** | Ubuntu 22.04+ | Ubuntu 24.04 LTS |
-| **Costo** | $15–25 USD/mes | **$6–12 USD/mes** |
+| **Disco** | C: 3,6 GB libres de 33,6 · **G: 13,9 GB libres de 37,5** | Todo en **G:**, con rotación y tope de tamaño de logs |
+| **RAM** | 4,2 GB libres de 8 | Un proceso Node stateless, junto a los 9 servicios existentes |
+| **CPU** | 4 vCPU compartidas con app, SQL Express y 9 servicios | Tools con paginación, límite de resultados y timeout corto |
+| **Runtime** | Node 22 portable, propio del MCP | No se toca el Node 20.16 del sistema |
 
 ### Desglose de costos — Fase 1, equipo piloto de 5 personas
 
 | Concepto | Detalle | Costo mensual |
 |---|---|---|
-| **VPS Linux** | Hetzner CX22 o similar | $7 USD |
+| **Infraestructura nueva** | Ninguna: el MCP corre en el VPS existente | **$0** |
+| **Exposición HTTPS** | Pendiente de definir en Fase 1 (hoy nginx escucha sin TLS) | a determinar |
 | **App de chat** | 5 cuentas con soporte de conectores | $100–150 USD |
-| **Dominio + SSL** | Let's Encrypt | $0 |
-| **Total** | | **$107–157 USD/mes** |
+| **Total** | | **$100–150 USD/mes** |
 
 ### Escenarios de costo total
 
@@ -959,15 +1008,17 @@ La organización paga hoy ChatGPT Plus ($20) + Claude Max ($100) = **$120 USD/me
 
 | Escenario | Detalle | Costo mensual | Diferencia vs. hoy |
 |---|---|---|---|
-| **Claude Pro × 5 + VPS** | 5 cuentas Pro ($20/u) + VPS. Sin gestión centralizada de conectores. | **$107 USD** | **−$13/mes** |
-| **Claude Team × 5 + VPS** | 5 cuentas Team ($25/u) + VPS. Gestión centralizada, escritura estable. | $132 USD | +$12/mes |
-| **ChatGPT Business × 5 + VPS** | 5 cuentas Business ($25–30/u) + VPS. Escritura en beta. | $132–157 USD | +$12 a +$37/mes |
+| **Claude Pro × 5** | 5 cuentas Pro ($20/u). Sin gestión centralizada de conectores. | **$100 USD** | **−$20/mes** |
+| **Claude Team × 5** | 5 cuentas Team ($25/u). Gestión centralizada, escritura estable. | $125 USD | +$5/mes |
+| **ChatGPT Business × 5** | 5 cuentas Business ($25–30/u). Escritura en beta. | $125–150 USD | +$5 a +$30/mes |
 
 **Corrección respecto de la v1.5:** el documento anterior planteaba escenarios a costo cero usando ChatGPT Plus. Ese escenario no es viable: **Plus no soporta conectores MCP custom**. El piso real para ChatGPT es el plan Business.
 
-**Recomendación:** arrancar con **Claude Pro × 5 + VPS** ($107/mes, menos que hoy) para el piloto, y evaluar el salto a Team cuando la gestión centralizada de conectores lo justifique.
+**Cambio respecto de la v2.4:** los tres escenarios bajan $7/mes porque desaparece el VPS Linux. Lo que se paga en su lugar no es plata: es el riesgo aceptado de alojar el MCP en el servidor sin soporte.
 
-**El costo marginal real del proyecto es el VPS: $7 USD/mes.** El número relevante a evaluar no es la infraestructura sino **las horas de desarrollo interno** — y el hallazgo de que la API ya existe reduce esas horas de forma significativa.
+**Recomendación:** arrancar con **Claude Pro × 5** ($100/mes, menos que hoy) para el piloto, y evaluar el salto a Team cuando la gestión centralizada de conectores lo justifique.
+
+**El costo marginal de infraestructura del proyecto es $0.** El número relevante a evaluar no es la infraestructura sino **las horas de desarrollo interno** — y el hallazgo de que la API ya existe reduce esas horas de forma significativa.
 
 ---
 
@@ -1000,7 +1051,8 @@ La organización paga hoy ChatGPT Plus ($20) + Claude Max ($100) = **$120 USD/me
 - [x] ~~Definir el área piloto~~ — Secretaría Académica
 - [ ] **Escalar a dirección el estado de parcheo del servidor**, como tema independiente de este proyecto
 - [ ] Decisión de dirección: ¿se aprueba que PII de estudiantes atraviese un modelo de terceros?
-- [ ] Contratar el VPS Linux y configurar nginx + certificados
+- [ ] Instalar **Node 22 portable** y el MCP Server como **servicio Windows** en `G:` del servidor existente, siguiendo el patrón de los 9 microservicios ya instalados
+- [ ] Resolver la **exposición HTTPS** del endpoint MCP en el servidor existente (hoy nginx escucha en 8443 sin TLS)
 
 > El spike va primero porque valida los supuestos de autenticación y de soporte de la app antes de comprometer semanas de desarrollo. Si algo no funciona como esperamos, queremos saberlo en la semana 1.
 
@@ -1022,7 +1074,7 @@ Se implementó la tool más simple (`listar_cursos`, sin parámetros y sin PII) 
 
 Implementación: `github.com/saberesterratecnologia/saberes-mcp` (privado), TypeScript sobre el SDK oficial de MCP.
 
-> ⚠️ El spike corrió con transporte **stdio local**. El paso a producción multiusuario requiere el VPS con HTTPS. Y si el equipo usara ChatGPT en vez de Claude, **stdio no es una opción**: ChatGPT solo acepta conectores remotos por HTTPS, o sea que el VPS y OAuth dejan de ser el paso siguiente para ser el paso previo.
+> ⚠️ El spike corrió con transporte **stdio local**. El paso a producción multiusuario requiere **exponer el MCP por HTTPS en el servidor existente**, y eso todavía no está resuelto: hoy nginx escucha en 8443 sin TLS. Y si el equipo usara ChatGPT en vez de Claude, **stdio no es una opción**: ChatGPT solo acepta conectores remotos por HTTPS, o sea que la exposición HTTPS y OAuth dejan de ser el paso siguiente para ser el paso previo.
 
 ### Fase 1 — Piloto de lectura (Semanas 2–5)
 
@@ -1081,7 +1133,18 @@ Verificado por acceso directo al servidor el 14/09/2026:
 
 Esto significa que el sistema que gestiona datos personales de estudiantes, cobros y facturación corre sobre un sistema operativo y un motor de base de datos que **no reciben correcciones de seguridad de ningún tipo**, y para los cuales existen vulnerabilidades públicas conocidas y sin parchear desde entonces.
 
-**Cómo lo mitiga esta arquitectura:** poniendo el MCP Server en un VPS Linux separado, el proyecto de agentes **no agrega superficie de exposición** sobre el servidor vulnerable, no introduce un runtime nuevo ahí, y no queda atado a su calendario de migración.
+**Qué cambió con la decisión del 23/09/2026, dicho sin maquillaje:** la v2.4 mitigaba este riesgo poniendo el MCP Server en un VPS Linux separado. **Esa mitigación ya no existe.** El MCP Server va en esta misma máquina, así que el proyecto de agentes **sí agrega una superficie expuesta a internet** sobre un servidor sin parches, y **sí queda atado a su calendario de migración**.
+
+**Riesgo aceptado explícitamente por Max el 23/09/2026**, con estas mitigaciones:
+
+| Qué se acepta | Mitigación |
+|---|---|
+| Superficie nueva sobre un SO sin parches: el endpoint HTTPS del MCP, que recibe tráfico desde internet | El MCP escucha **solo en `127.0.0.1`** y se publica como **ruta nueva del nginx existente**, sin puerto nuevo, con autenticación obligatoria. Hacia el CRM solo llamadas salientes a `POST /api` (se **evaluará** resolverlas por localhost) |
+| Presión de disco (C: al 89,7 %) | MCP, Node portable y logs de auditoría **en `G:`**, con rotación y tope de tamaño |
+| Cero aislamiento: app + SQL Express + 9 servicios + MCP en un solo equipo | Tools con paginación, límite de resultados y timeout corto. MCP stateless y reiniciable. Monitoreo durante el piloto |
+| Runtime atado a **Node 22** (Node 24+ no arranca en 2012 R2) | Node 22 portable y aislado del Node 20.16 del sistema. Salir de Node 22 exige migrar el servidor |
+
+**Consecuencia para este riesgo:** la migración del servidor pasa a ser **también un prerrequisito de este proyecto**, no solo un tema de dirección paralelo. El MCP migra junto con el servidor. Ver [Dónde vive el MCP Server](#dónde-vive-el-mcp-server-decisión-con-riesgo-aceptado).
 
 **Lo que esta arquitectura NO resuelve, y hay que decir con todas las letras:** la migración de Saberes-Terra a una plataforma con soporte. Ese es un proyecto aparte, más urgente que este, y su postergación no se vuelve más segura porque el proyecto de agentes avance bien.
 
@@ -1137,7 +1200,10 @@ Dato a favor: **no existe wildcard** en `acciones_permitidas`. Cada acción se e
 
 El VPS del CRM ya tiene los puertos 3030, 3031 y 8443 expuestos a internet, sobre un sistema operativo sin parches desde 2023.
 
-**Regla de diseño:** el MCP Server **no requiere abrir ningún puerto nuevo** del lado del CRM. Es el MCP quien inicia las conexiones salientes hacia `POST /api` por HTTPS. El CRM solo necesita permitir tráfico entrante desde la IP del VPS Linux hacia el puerto HTTPS que ya usa.
+**Regla de diseño:** el MCP Server **no abre ningún puerto nuevo**. Con el MCP en la misma máquina (decisión del 23/09/2026) hay dos tramos, y los dos se resuelven sin puertos nuevos:
+
+- **Hacia el CRM:** el MCP inicia las conexiones salientes a `POST /api`. No hace falta habilitar ninguna IP de origen; queda por **evaluar** si la llamada se resuelve directamente por localhost.
+- **Desde internet:** el conector remoto sí necesita alcanzar al MCP. El proceso escucha **solo en `127.0.0.1`** y se publica como **una ruta más del nginx existente**, con autenticación obligatoria. Cómo se termina TLS en ese nginx (hoy escucha en 8443 sin TLS) es el punto abierto de Fase 1.
 
 Este proyecto no debe sumar un solo puerto a esa máquina.
 
@@ -1152,7 +1218,7 @@ Este proyecto no debe sumar un solo puerto a esa máquina.
 | **Inyección de prompts** | Media | Medio | Servidor propio y self-hosted. Permisos acotados por área. Fase 1 sin escritura. |
 | **El spec de MCP vuelve a cambiar** | **Alta** | Bajo | Ya pasó tres veces en 14 meses. Se usa el SDK oficial, que absorbe la mayor parte. Política de deprecación de 12 meses mínimo. |
 | **Developer Mode de ChatGPT sigue en beta** | Media | Medio | El spike de Fase 0 lo valida. Claude es la alternativa sin beta. |
-| **Costos escalan** | Baja | Bajo | El costo marginal real es $7/mes. Las suscripciones ya existen. |
+| **Costos escalan** | Baja | Bajo | El costo marginal de infraestructura es $0. Las suscripciones ya existen. |
 
 ### Nota sobre Moodle
 
@@ -1185,9 +1251,9 @@ La integración es por **API HTTP, sin base de datos compartida** (`Negocio/Mood
 
 ### Punto de equilibrio
 
-El costo marginal de infraestructura es **$7 USD/mes**. Las suscripciones a apps de IA ya se pagan hoy y se reasignan.
+El costo marginal de infraestructura es **$0**: el MCP Server corre en el servidor que ya se paga. Las suscripciones a apps de IA ya se pagan hoy y se reasignan.
 
-Con ese costo, el sistema se paga si ahorra aproximadamente **media hora de trabajo al mes**. Considerando solo los casos de lectura de Fase 1, el equilibrio se alcanza en la primera semana de uso.
+Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en positivo desde el primer día. Considerando solo los casos de lectura de Fase 1, el equilibrio se alcanza en la primera semana de uso.
 
 **El análisis honesto no es sobre infraestructura, que es despreciable, sino sobre las horas de desarrollo interno.** El hallazgo de que la API ya existe —y de que tres de las cinco tools iniciales no requieren código nuevo en el CRM— reduce esas horas de forma significativa respecto de lo estimado en la v1.5.
 
@@ -1227,8 +1293,10 @@ Con ese costo, el sistema se paga si ahorra aproximadamente **media hora de trab
 9. **¿Qué tabla modela la comisión de venta?**
    - Requiere confirmación del owner del dominio antes de incluirlo en cualquier fase
 
-10. **¿Proveedor de VPS?**
-   - Hetzner (mejor precio/rendimiento), DigitalOcean (más simple), Contabo (más barato)
+10. ~~¿Proveedor de VPS?~~ — **Resuelto (obsoleto).** La decisión del 23/09/2026 elimina el VPS nuevo: el MCP Server va en el VPS Windows existente, con Node 22 portable y riesgo aceptado por Max. Ver [Dónde vive el MCP Server](#dónde-vive-el-mcp-server-decisión-con-riesgo-aceptado)
+
+11. **¿Cómo se expone el endpoint MCP por HTTPS en el servidor existente?**
+   - Abierto desde la decisión del 23/09/2026. Hoy nginx escucha en 8443 **sin TLS** y el firewall entrante permite 80/443. Es tarea de Fase 1 y no tiene solución elegida
 
 ---
 
@@ -1264,6 +1332,6 @@ Con ese costo, el sistema se paga si ahorra aproximadamente **media hora de trab
 ---
 
 *Documento generado como parte del análisis de viabilidad del proyecto IA-ORGANIZACIONAL.*
-*Versión 2.3 — revisada contra el estado del ecosistema MCP a septiembre de 2026, contra el código de Saberes-Terra y contra el servidor de producción.*
+*Versión 2.5 — revisada contra el estado del ecosistema MCP a septiembre de 2026, contra el código de Saberes-Terra y contra el servidor de producción (última verificación por SSH: 23/09/2026).*
 *Código y documentación del CRM citados contra `origin/main` @ `61a2ace3`.*
 *Para consultas técnicas o ampliaciones, contactar al equipo de desarrollo.*
