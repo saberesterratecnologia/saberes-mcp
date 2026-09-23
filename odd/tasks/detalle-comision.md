@@ -41,7 +41,7 @@ auditoría, transporte HTTP.
 - [x] **T4 — Verificación e2e contra producción + actualizar `DISENO-TOOLS-MCP.md`** — v1.2
   Contrato medido en §Tool 3, checklist pasos 3 (parcial) y 7.
 
-- [ ] **T5 — Seguimiento de la revisión nativa** (`review-e542117105f7ace4`, advertencias no bloqueantes)
+- [x] **T5 — Seguimiento de la revisión nativa** — `f5599c7` (`review-e542117105f7ace4`, advertencias no bloqueantes)
   - `R3-error-envelope-masking` (`src/saberes-client.ts`): `result:"error"` se colapsa en "no existe".
     Nunca se observó en esta acción; si aparece por otra causa, la persona recibiría "no existe la
     comisión" en vez de una falla. Es exactamente la afirmación falsa que el diseño manda evitar.
@@ -65,3 +65,4 @@ auditoría, transporte HTTP.
   `bot_contexto`, WhatsApp o instituciones. `DISENO-TOOLS-MCP.md` → v1.2.
   Dato del CRM (fuera de alcance): `Valor_de_la_inscripción_promocionada` trae la anotación
   "VALOR DE LA CUOTA CON DESCUENTO", o sea que el texto de la inscripción habla de la cuota.
+- **2026-09-23** — T5: `api_error` nuevo; `result:"error"` ahora es falla, no "no existe". `toIsoDate` valida la hora. 41 → 44 tests.
