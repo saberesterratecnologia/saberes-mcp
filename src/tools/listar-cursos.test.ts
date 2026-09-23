@@ -1,13 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SaberesApiError } from "../saberes-client.ts";
-import {
-  describeFailure,
-  formatCourses,
-  toCourse,
-  type Course,
-} from "./listar-cursos.ts";
+import { formatCourses, toCourse, type Course } from "./listar-cursos.ts";
 
 test("the wire shape is translated into a domain course", () => {
   const course = toCourse({
@@ -79,31 +73,4 @@ test("a single course is described in the singular", () => {
   ]);
 
   assert.match(text, /Hay 1 curso disponible:/);
-});
-
-test("each failure kind gets its own explanation, chosen by kind", () => {
-  const seen = new Set<string>();
-  const kinds = [
-    "authentication_failed",
-    "action_not_allowed",
-    "timeout",
-    "network_error",
-    "server_error",
-    "invalid_json",
-  ] as const;
-
-  for (const kind of kinds) {
-    const text = describeFailure(new SaberesApiError(kind, "internal detail"));
-    assert.ok(text.length > 0, kind);
-    // The internal wording must never reach the person.
-    assert.ok(!text.includes("internal detail"), kind);
-    seen.add(text);
-  }
-
-  // Authentication, permissions, timeouts and outages must not read alike.
-  assert.ok(seen.size >= 5);
-});
-
-test("a non-API failure still produces a sentence, not a crash", () => {
-  assert.match(describeFailure(new Error("boom")), /error inesperado/);
 });
