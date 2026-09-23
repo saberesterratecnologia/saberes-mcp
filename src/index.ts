@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { SaberesClient } from "./saberes-client.ts";
+import { registerDetalleComision } from "./tools/detalle-comision.ts";
 import { registerListarCursos } from "./tools/listar-cursos.ts";
 
 const DEFAULT_API_URL = "https://saberes.com.ar/api";
@@ -33,5 +34,6 @@ const client = new SaberesClient({
 const server = new McpServer({ name: "saberes-mcp", version: "0.1.0" });
 
 registerListarCursos(server, client);
+registerDetalleComision(server, client);
 
 await server.connect(new StdioServerTransport());
