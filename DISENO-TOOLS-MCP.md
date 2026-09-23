@@ -1,12 +1,14 @@
 # Diseño de Tools — MCP Server Saberes
 
-**Versión:** 1.1
+**Versión:** 1.2
 **Fecha:** Septiembre 2026
 **Alcance:** Fase 1 — Secretaría Académica, solo lectura
 **Revisión de protocolo MCP:** 2026-07-28
-**Documento padre:** `PROPUESTA-AGENTES-IA.md` v2.3
+**Documento padre:** `PROPUESTA-AGENTES-IA.md` v2.5
 
 Artefacto de implementación. Define el contrato exacto de las cuatro tools de la Fase 1, su mapeo a las acciones de `POST /api`, las reglas de traducción y el manejo de errores.
+
+> **Cambios de la v1.2 (23/09/2026).** `detalle_comision` implementada y verificada contra producción. El contrato medido de `recuperar_comision_x_id` difiere del ejemplo original en casing, formato de fecha, tipo de la duración y tildes de los `Valor_*`: ver [Contrato medido](#contrato-medido-contra-producción-23092026). Las reglas R1–R5 quedaron como módulo compartido; R6 llega con `buscar_comision`.
 
 > **Cambios de la v1.1 (18/09/2026).** El cliente fue dado de alta en producción y el spike de Fase 0 se ejecutó de punta a punta. Lo medido contra producción corrigió tres cosas que la v1.0 daba por buenas leyendo el código:
 >
@@ -465,10 +467,29 @@ Con `incluir_aranceles: true` se agrega un objeto `aranceles` con los siete valo
 
 > ⚠️ Notar que acá es **`contiene`**, correctamente escrito. En `recuperar_persona_comision` el mismo mensaje dice **`contienen`** (typo en producción). **No son el mismo string** — si se hace matching literal, copiar cada uno tal cual.
 
+### Contrato medido contra producción (23/09/2026)
+
+El ejemplo de **Salida** de arriba es el diseño original; el contrato real difiere en la forma de los datos, y la implementación traduce desde lo medido:
+
+| Aspecto | Diseño original | Medido en producción |
+|---|---|---|
+| Request | — | `{"action":"recuperar_comision_x_id","id_comision":2672}`, parámetro al nivel raíz. Acepta número o string numérico |
+| `data` cuando existe | — | **Objeto**, no array |
+| No existe | `200` + `data: null` | ✅ Confirmado: `result:"ok"`, `message:"Sin resultados."`, `data:null` |
+| Parámetro no numérico o ausente | `400` con mensaje JSON | `400` **con HTML** (IIS reemplaza el cuerpo, ver §3). El mensaje literal nunca llega; el `inputSchema` evita el caso |
+| Casing | `"presencial"`, `"abierta"`, `"terra"` | Todo en **MAYÚSCULAS**. Se normaliza igual que `listar_cursos`: curso en sentence case, organización y lugares como nombre propio, modalidad y estado en minúscula. `nombre` (código de comisión) queda tal cual |
+| Fechas | "formato local" | **`dd/mm/yyyy`**. `Charla_Informativa` puede traer **texto libre** ("Sin charla programada"): por R4 se omite |
+| `Duración_en_meses` | número | **String** (`"4"`) → entero |
+| `"S/D"` | posible | Confirmado en localidad, sede, domicilio, maps, primera y segunda clase |
+| Montos | — | Strings con anotaciones (`"$ 29.000 (*VALOR ...)"`). Se pasan como texto, sin parsear |
+| Nombres de `Valor_*` | — | ⚠️ **Tildes inconsistentes**: `Valor_de_la_inscripcion_regular` y `Valor_de_la_certificacion` **sin** tilde, `Valor_de_la_inscripción_promocionada` **con** tilde. Se mapean literal por literal |
+| Clave extra | — | Además trae `bot_contexto_operativo_curso` (texto libre): excluida como `bot_contexto_operativo` |
+
 ### Notas
 
 - **Sin PII** con la proyección definida.
 - Volumen acotado: `.FirstOrDefault()` sobre el SP.
+- Implementación: `src/tools/detalle-comision.ts`. El `inputSchema` es estricto (`additionalProperties: false`, `id_comision` entero ≥ 1), así que un id inválido lo rechaza el SDK antes de llamar a la API.
 
 ---
 
@@ -665,11 +686,11 @@ En Fase 1 el campo `conector` identifica el **área**. En Fase 2, con identidad 
 |---|---|---|
 | 1 | ~~Cliente `SERVICIO_API` dado de alta con la lista blanca~~ ✅ **hecho** (`id 14`, 18/09) | — |
 | 2 | ~~Cliente HTTP hacia `/api` con `X-Api-Token`, timeout y reintentos~~ ✅ **hecho** | 1 |
-| 3 | Capa de traducción: R1–R6 como funciones reutilizables | 2 |
+| 3 | Capa de traducción: R1–R6 como funciones reutilizables — 🟡 **R1–R5 hechas** en `src/translation.ts` (23/09); R6 llega con `buscar_comision` | 2 |
 | 4 | ~~`listar_cursos` — la más simple, valida el circuito completo~~ ✅ **hecho** | 3 |
 | 5 | Índice cacheado con refresco en background | 3 |
 | 6 | `buscar_comision` sobre el índice | 5 |
-| 7 | `detalle_comision` | 3 |
+| 7 | ~~`detalle_comision`~~ ✅ **hecho** (23/09, verificado contra producción) | 3 |
 | 8 | `estado_de_persona` con desambiguación | 7 |
 | 9 | Auditoría | 4 |
 | 10 | `server/discover`, `tools/list` con `ttlMs` y `cacheScope: private` | 4 |
