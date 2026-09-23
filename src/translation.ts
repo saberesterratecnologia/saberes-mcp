@@ -127,13 +127,13 @@ export function toPositiveInteger(
  */
 export function describeFailure(error: unknown): string {
   if (!(error instanceof SaberesApiError)) {
-    return "No pude consultar los cursos por un error inesperado del servidor MCP.";
+    return "No pude hacer la consulta por un error inesperado del servidor MCP.";
   }
   switch (error.kind) {
     case "authentication_failed":
       return "No pude autenticarme contra el sistema Saberes. El token de la integración no es válido o el cliente está desactivado. Avisale al equipo técnico; no es algo que puedas resolver desde acá.";
     case "action_not_allowed":
-      return "Esta integración no tiene permiso para consultar los cursos. El permiso se otorga en el CRM, por el equipo técnico.";
+      return "Esta integración no tiene permiso para esta consulta. El permiso se otorga en el CRM, por el equipo técnico.";
     case "timeout":
       return "El sistema Saberes no respondió a tiempo. Puede ser algo pasajero: probá de nuevo en un momento.";
     case "network_error":
