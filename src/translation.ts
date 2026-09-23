@@ -14,8 +14,14 @@ import { SaberesApiError } from "./saberes-client.ts";
 /** The literal the CRM writes when a field has no value. */
 const SENTINEL = "S/D";
 
-/** `dd/mm/yyyy` with an optional trailing time, which is discarded. */
-const DATE_PATTERN = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\sT]+\d{1,2}:\d{2}(?::\d{2})?)?$/;
+/**
+ * `dd/mm/yyyy` with an optional trailing time, which is discarded.
+ *
+ * The time components are captured instead of skipped because their ranges
+ * still have to be checked: the shape alone would accept `99:99`.
+ */
+const DATE_PATTERN =
+  /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 
 export function upperFirst(value: string): string {
   const first = value.slice(0, 1).toLocaleUpperCase("es-AR");
@@ -71,6 +77,10 @@ export function dropSentinel(value: string | null | undefined): string | undefin
  * through `Date.UTC`, which is what rejects `31/02/2026` rather than rolling it
  * over into March.
  *
+ * A trailing time is discarded, but it is still validated: `24:00` or `99:99`
+ * is a malformed field, and R4 omits a malformed field whole rather than
+ * salvaging the half of it that happens to parse.
+ *
  * Date fields also carry free text in production ("Sin charla programada"), so
  * anything that does not match is absent, not an error.
  */
@@ -84,6 +94,14 @@ export function toIsoDate(value: string | null | undefined): string | undefined 
   const day = Number(match[1]);
   const month = Number(match[2]);
   const year = Number(match[3]);
+
+  const rawHours = match[4];
+  if (rawHours !== undefined) {
+    const hours = Number(rawHours);
+    const minutes = Number(match[5] ?? 0);
+    const seconds = Number(match[6] ?? 0);
+    if (hours > 23 || minutes > 59 || seconds > 59) return undefined;
+  }
 
   const date = new Date(Date.UTC(year, month - 1, day));
   const roundTrips =
@@ -140,6 +158,8 @@ export function describeFailure(error: unknown): string {
       return "No pude conectarme al sistema Saberes. Puede estar caído o haber un problema de red.";
     case "server_error":
       return "El sistema Saberes falló al procesar la consulta. El error quedó registrado del lado del CRM para que lo revisen.";
+    case "api_error":
+      return "El sistema Saberes rechazó la consulta sin un motivo que pueda interpretar. Avisale al equipo técnico.";
     case "invalid_json":
     case "bad_request":
     case "method_not_allowed":

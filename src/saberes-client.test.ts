@@ -171,16 +171,28 @@ test("a commission that does not exist is null, not a failure", async () => {
   assert.equal(await clientWith(fakeFetch(200, body)).getCommission(1), null);
 });
 
-test("result 'error' is also treated as not found", async () => {
-  // The API signals a missing commission this way too, so routing by envelope
-  // result keeps the tool from turning a normal miss into an error.
+test("result 'error' is a failure, never a missing commission", async () => {
+  // Production only ever signals a miss with result 'ok' and data null, so an
+  // error envelope is an unknown problem. Collapsing it into 'does not exist'
+  // would answer a question nobody could verify.
   const body = JSON.stringify({
     result: "error",
-    message: "Sin resultados.",
+    message: "Algo interno salió mal.",
     data: null,
   });
+  const client = clientWith(fakeFetch(200, body));
 
-  assert.equal(await clientWith(fakeFetch(200, body)).getCommission(1), null);
+  await assert.rejects(
+    () => client.getCommission(1),
+    (error: unknown) => {
+      assert.ok(error instanceof SaberesApiError);
+      assert.equal(error.kind, "api_error");
+      assert.equal(error.status, 200);
+      // The API's own wording may carry internals, so it is never relayed.
+      assert.ok(!error.message.includes("Algo interno salió mal."));
+      return true;
+    },
+  );
 });
 
 test("a rejected commission request still fails as a bad request", async () => {

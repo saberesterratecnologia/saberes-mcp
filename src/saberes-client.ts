@@ -85,6 +85,7 @@ export type SaberesErrorKind =
   | "server_error"
   | "unexpected_status"
   | "invalid_json"
+  | "api_error"
   | "timeout"
   | "network_error";
 
@@ -243,16 +244,29 @@ export class SaberesClient {
   /**
    * Recovers one commission by its id, or `null` when it does not exist.
    *
-   * A missing commission is not a failure: the API answers 200 with
-   * `result:"ok"`, `message:"Sin resultados."` and `data:null`. It may also
-   * signal the same miss with `result:"error"`, so both shapes collapse into
-   * `null` and only transport-level problems throw.
+   * A missing commission is not a failure: measured against production on
+   * 2026-09-23, the only miss shape of this action is 200 with `result:"ok"`,
+   * `message:"Sin resultados."` and `data:null`.
+   *
+   * `result:"error"` was never observed here, so it is an unknown problem and
+   * it throws. Reading it as "the commission does not exist" would turn an
+   * unexplained failure into a confident false answer, which is the one
+   * outcome this integration must never produce.
+   *
+   * The envelope's own `message` is not relayed: it is written for CRM
+   * operators and may carry internals.
    */
   async getCommission(id: number): Promise<RawCommission | null> {
     const envelope = await this.call<RawCommission>("recuperar_comision_x_id", {
       id_comision: id,
     });
-    if (envelope.result === "error") return null;
+    if (envelope.result === "error") {
+      throw new SaberesApiError(
+        "api_error",
+        'The API answered 200 with result "error".',
+        200,
+      );
+    }
     return envelope.data ?? null;
   }
 }

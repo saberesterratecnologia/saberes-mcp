@@ -215,6 +215,23 @@ test("a commission that does not exist is explained, not reported as an error", 
   );
 });
 
+test("an error envelope is a failure, never a commission that does not exist", async () => {
+  const { handler } = registered(
+    clientAnswering(
+      new SaberesApiError("api_error", 'The API answered 200 with result "error".', 200),
+    ),
+  );
+
+  const result = await handler({ id_comision: 2672 });
+
+  assert.equal(result.isError, true);
+  const text = result.content[0]?.text ?? "";
+  // Answering "it does not exist" here would be a confident lie: the API never
+  // said that, it said something went wrong.
+  assert.ok(!text.includes("No existe"), text);
+  assert.match(text, /rechaz\u00f3/);
+});
+
 test("a failure is reported without the internal wording", async () => {
   const { handler } = registered(
     clientAnswering(new SaberesApiError("authentication_failed", "internal detail")),

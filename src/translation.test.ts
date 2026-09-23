@@ -59,6 +59,17 @@ test("R4: dd/mm/yyyy becomes an ISO date", () => {
 test("R4: an optional trailing time is tolerated and dropped", () => {
   assert.equal(toIsoDate("15/10/2026 09:00"), "2026-10-15");
   assert.equal(toIsoDate("15/10/2026 9:00:00"), "2026-10-15");
+  assert.equal(toIsoDate("15/10/2026 23:59:59"), "2026-10-15");
+  assert.equal(toIsoDate("15/10/2026T00:00"), "2026-10-15");
+});
+
+test("R4: an impossible time makes the whole field absent", () => {
+  // The time is discarded, but it is still evidence: a field that cannot be
+  // read is malformed as a whole, so its date is not trustworthy either.
+  assert.equal(toIsoDate("15/10/2026 24:00"), undefined);
+  assert.equal(toIsoDate("15/10/2026 99:99"), undefined);
+  assert.equal(toIsoDate("15/10/2026 10:60"), undefined);
+  assert.equal(toIsoDate("15/10/2026 10:00:60"), undefined);
 });
 
 test("R4: impossible dates are absent, never silently shifted", () => {
@@ -107,6 +118,7 @@ test("each failure kind gets its own explanation, chosen by kind", () => {
     "network_error",
     "server_error",
     "invalid_json",
+    "api_error",
   ] as const;
 
   for (const kind of kinds) {
@@ -119,6 +131,19 @@ test("each failure kind gets its own explanation, chosen by kind", () => {
 
   // Authentication, permissions, timeouts and outages must not read alike.
   assert.ok(seen.size >= 5);
+});
+
+test("an error envelope is explained as a rejection, not as an odd answer", () => {
+  const envelope = describeFailure(
+    new SaberesApiError("api_error", "internal detail", 200),
+  );
+
+  assert.match(envelope, /rechaz\u00f3/);
+  // It must not borrow the wording of a shape the tool could not parse.
+  assert.notEqual(
+    envelope,
+    describeFailure(new SaberesApiError("unexpected_status", "internal detail", 418)),
+  );
 });
 
 test("a non-API failure still produces a sentence, not a crash", () => {
