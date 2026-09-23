@@ -141,6 +141,62 @@ test("an unreachable endpoint fails as a network error", async () => {
   assert.equal((await failureOf(clientWith(brokenFetch))).kind, "network_error");
 });
 
+test("one commission is requested by its numeric id", async () => {
+  const capture: Capture = {};
+  const body = JSON.stringify({
+    result: "ok",
+    message: "",
+    data: { id_comision: 2672, id_curso: 28, Comision: "UNA COMISIÓN" },
+  });
+
+  const commission = await clientWith(
+    fakeFetch(200, body, capture),
+  ).getCommission(2672);
+
+  const sent = JSON.parse(String(capture.init?.body));
+  assert.equal(sent.action, "recuperar_comision_x_id");
+  assert.equal(sent.id_comision, 2672);
+  // The happy path is an object, not the array `listCourses` receives.
+  assert.equal(commission?.id_comision, 2672);
+  assert.equal(commission?.Comision, "UNA COMISIÓN");
+});
+
+test("a commission that does not exist is null, not a failure", async () => {
+  const body = JSON.stringify({
+    result: "ok",
+    message: "Sin resultados.",
+    data: null,
+  });
+
+  assert.equal(await clientWith(fakeFetch(200, body)).getCommission(1), null);
+});
+
+test("result 'error' is also treated as not found", async () => {
+  // The API signals a missing commission this way too, so routing by envelope
+  // result keeps the tool from turning a normal miss into an error.
+  const body = JSON.stringify({
+    result: "error",
+    message: "Sin resultados.",
+    data: null,
+  });
+
+  assert.equal(await clientWith(fakeFetch(200, body)).getCommission(1), null);
+});
+
+test("a rejected commission request still fails as a bad request", async () => {
+  const client = clientWith(fakeFetch(400, "<html/>"));
+
+  await assert.rejects(
+    () => client.getCommission(2672),
+    (error: unknown) => {
+      assert.ok(error instanceof SaberesApiError);
+      assert.equal(error.kind, "bad_request");
+      assert.equal(error.status, 400);
+      return true;
+    },
+  );
+});
+
 test("the token never leaks through any error", async () => {
   const statuses = [302, 400, 403, 405, 500, 418];
 

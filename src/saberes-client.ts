@@ -30,6 +30,53 @@ export interface RawCourse {
   Organizacion: string;
 }
 
+/**
+ * A commission exactly as the API returns it, measured against production on
+ * 2026-09-23. The key names are literal, including the inconsistent accents:
+ * `Valor_de_la_inscripcion_regular` has none while
+ * `Valor_de_la_inscripción_promocionada` does, and `Valor_de_la_certificacion`
+ * has none either. Normalizing them here would silently stop matching the wire.
+ *
+ * Every text field is nullable, and an absent value may also arrive as the
+ * literal `"S/D"`. Dates arrive as `dd/mm/yyyy` and counts arrive as strings.
+ * Translating all of that is the tool layer's job, not the client's.
+ */
+export interface RawCommission {
+  id_comision: number;
+  id_curso: number;
+  Organizacion: string | null;
+  Comision: string | null;
+  Curso: string | null;
+  Modalidad: string | null;
+  Estado_de_la_comisión: string | null;
+  Carga_horaria_certificada: string | null;
+  Categoria: string | null;
+  Institución_Gestora: string | null;
+  Institución_Certificadora: string | null;
+  Institución_Capacitadora: string | null;
+  Localidad_de_cursado: string | null;
+  Lugar_de_cursado: string | null;
+  Domicilio_de_la_sede: string | null;
+  URL_MAPS: string | null;
+  Fecha_Hora_Inicio: string | null;
+  Duración_en_meses: string | null;
+  Charla_Informativa: string | null;
+  Primera_Clase: string | null;
+  Segunda_Clase: string | null;
+  Horarios_de_cursado: string | null;
+  Valor_de_la_inscripcion_regular: string | null;
+  Valor_de_la_inscripción_promocionada: string | null;
+  Valor_de_la_cuota_regular: string | null;
+  Valor_de_la_cuota_promocionada: string | null;
+  Valor_del_pago_unico: string | null;
+  Valor_de_la_cuota_con_recargo: string | null;
+  Valor_de_la_certificacion: string | null;
+  Página_web_del_curso: string | null;
+  Enlace_invitación_grupo_de_Whatsapp: string | null;
+  bot_contexto_operativo: string | null;
+  bot_contexto_operativo_curso: string | null;
+}
+
 export type SaberesErrorKind =
   | "authentication_failed"
   | "action_not_allowed"
@@ -191,5 +238,21 @@ export class SaberesClient {
       "recuperar_cursos_disponibles",
     );
     return envelope.data ?? [];
+  }
+
+  /**
+   * Recovers one commission by its id, or `null` when it does not exist.
+   *
+   * A missing commission is not a failure: the API answers 200 with
+   * `result:"ok"`, `message:"Sin resultados."` and `data:null`. It may also
+   * signal the same miss with `result:"error"`, so both shapes collapse into
+   * `null` and only transport-level problems throw.
+   */
+  async getCommission(id: number): Promise<RawCommission | null> {
+    const envelope = await this.call<RawCommission>("recuperar_comision_x_id", {
+      id_comision: id,
+    });
+    if (envelope.result === "error") return null;
+    return envelope.data ?? null;
   }
 }
