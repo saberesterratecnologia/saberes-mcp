@@ -36,7 +36,7 @@ sumar `buscar_comision`.
 - [x] **T4 — `buscar_comision` sobre `buscar_comisiones`** — `a539b87` (tool nueva, paginada).
 - [x] **T5 — `listar_cursos` sobre `cursos_disponibles`** — `a539b87` (espera el campo `organizacion`).
 - [x] **T6 — Borrar la capa accidental** — `b95eeec` y el cliente de `/api`; configuración nueva.
-- [ ] **T7 — e2e contra producción + Claude Desktop** apuntando al token nuevo.
+- [x] **T7 — e2e contra producción + Claude Desktop** — validado por Max 24/09 apuntando al token nuevo.
 - [ ] **T8 — Quitarle al cliente 14 las 4 acciones de `/api`** (CRM; decisión de Max).
 
 ## Bitácora
@@ -69,3 +69,7 @@ sumar `buscar_comision`.
   backup `claude_desktop_config.json.bak-20260924-182553`: URL → `/api-mcp`, token → cliente 15
   (escrito sin mostrarse). Simulación con el mismo `command`/`args`/`env` del config: 3 tools OK
   contra producción. Falta que Max reinicie Claude Desktop y pruebe en un chat normal.
+- **2026-09-24** — T7 validada por Max en Claude Desktop (chat normal): "¿Qué cursos de apicultura
+  hay?" → las tres organizaciones con sus ids; "¿Cuánto sale la de Uruguay?" → comisión 2691 en
+  **pesos uruguayos**, sin inventar la inscripción regular (oculta por D1) y aclarando que los
+  datos no dicen la cantidad de cuotas ni si el pago único incluye la inscripción.
