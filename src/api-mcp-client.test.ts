@@ -55,12 +55,16 @@ async function failureOf(run: () => Promise<unknown>): Promise<ApiMcpError> {
  * Commission 2672 exactly as production answered on 2026-09-24, with the
  * certification fee absent: the business hides that amount, and `/api-mcp`
  * omits the key instead of sending a null.
+ *
+ * `moneda` is null because the CRM does not store the ISO 4217 code: what it
+ * does have is the wording the organization uses for its own currency.
  */
 const COMMISSION_2672 = {
   id: 2672,
   codigo: "PRODUCCIÓN EXTENSIVA-D-OCTUBRE-2026",
   curso: { id: 28, nombre: "Producción Extensiva de Cereales y Oleaginosas" },
   organizacion: { id: 2, nombre: "Terra - Instituto de Formación Agropecuaria" },
+  pais: { iso: "ARG", nombre: "Argentina" },
   modalidad: "Online",
   es_virtual: true,
   estado: "inscripciones",
@@ -76,7 +80,9 @@ const COMMISSION_2672 = {
   pagina_web:
     "https://institutoterra.com.ar/produccion-extensiva-de-cereales-y-oleaginosas/",
   aranceles: {
-    moneda: "ARS",
+    moneda: null,
+    moneda_simbolo: "$",
+    moneda_nombre: "pesos",
     inscripcion_regular: 58000,
     inscripcion_promocionada: 29000,
     cuota_regular: 55000,
@@ -190,6 +196,48 @@ test("the available courses arrive typed, with the organization when it is there
   assert.equal(courses[1]?.organizacion, undefined);
 });
 
+test("a course listing without a page is still a complete listing", async () => {
+  // The whole catalogue fits in one answer today, and an older deployment may
+  // not send `page` at all: its absence is not a contract that moved.
+  const payload = {
+    data: [{ id: 61, nombre: "Apicultura", modalidad: null, es_virtual: false }],
+  };
+
+  const courses = await clientWith(jsonFetch(200, payload)).listCourses();
+
+  assert.equal(courses.length, 1);
+});
+
+test("a paginated course listing fails loudly instead of answering one page", async () => {
+  // This client does not follow cursors. Returning the first page as if it
+  // were the catalogue would make the agent state that courses do not exist,
+  // which is worse than an error the technical team can act on.
+  const payload = {
+    data: [{ id: 61, nombre: "Apicultura", modalidad: null, es_virtual: false }],
+    page: { next_cursor: "c2VnLTQw", has_more: true },
+  };
+
+  const error = await failureOf(() =>
+    clientWith(jsonFetch(200, payload)).listCourses(),
+  );
+
+  assert.equal(error.kind, "contract_changed");
+  assert.equal(error.status, 200);
+  assert.match(error.message, /cursos_disponibles/);
+  assert.match(error.message, /pagin/i);
+});
+
+test("a course page that says there is no more is answered normally", async () => {
+  const payload = {
+    data: [{ id: 61, nombre: "Apicultura", modalidad: null, es_virtual: false }],
+    page: { next_cursor: null, has_more: false },
+  };
+
+  const courses = await clientWith(jsonFetch(200, payload)).listCourses();
+
+  assert.equal(courses[0]?.id, 61);
+});
+
 test("one commission arrives with its fees, dates and numbers as data", async () => {
   const commission = await clientWith(
     jsonFetch(200, { data: COMMISSION_2672 }),
@@ -206,17 +254,16 @@ test("one commission arrives with its fees, dates and numbers as data", async ()
   assert.equal(commission?.carga_horaria_horas, 64);
   assert.equal(commission?.localidad, null);
   assert.equal(commission?.charla_informativa, null);
-  assert.equal(commission?.aranceles?.moneda, "ARS");
+  assert.equal(commission?.aranceles?.moneda, null);
   assert.equal(commission?.aranceles?.pago_unico, 159000);
   // The business hides this amount, so the key is simply not there.
   assert.equal(commission?.aranceles?.certificacion, undefined);
 });
 
 test("a currency the CRM could not determine is null, not a changed contract", async () => {
-  // The CRM used to answer "ARS" for every commission, which is false for the
-  // Uruguayan and Paraguayan organizations. It now sends the real ISO 4217
-  // code, or null when it cannot determine one: an unknown currency is data,
-  // not a contract that moved.
+  // The ISO 4217 code is not stored in the CRM, so `moneda` arrives null for
+  // every organization. An unknown currency is data, not a contract that
+  // moved: the tools have to say it out loud instead of guessing.
   const payload = {
     data: {
       ...COMMISSION_2672,
@@ -231,6 +278,99 @@ test("a currency the CRM could not determine is null, not a changed contract", a
 
   assert.equal(commission?.aranceles?.moneda, null);
   assert.equal(commission?.aranceles?.pago_unico, 159000);
+});
+
+test("the country of a commission arrives as data, with its ISO code", async () => {
+  // Measured in production on 2026-09-24: commission 2694 belongs to the
+  // Paraguayan organization, and `pais.iso` is the country code, never a
+  // currency.
+  const payload = {
+    data: {
+      ...COMMISSION_2672,
+      id: 2694,
+      pais: { iso: "PRY", nombre: "Paraguay" },
+      aranceles: {
+        moneda: null,
+        moneda_simbolo: "Gs.",
+        moneda_nombre: "guaraníes",
+        inscripcion_regular: 140000,
+        inscripcion_promocionada: 70000,
+        cuota_regular: 120000,
+        cuota_promocionada: 95000,
+        nota_promocion: "*Valor de inscripción con el 50% de descuento.",
+      },
+    },
+  };
+
+  const commission = await clientWith(jsonFetch(200, payload)).getCommission(
+    2694,
+    true,
+  );
+
+  assert.equal(commission?.pais?.iso, "PRY");
+  assert.equal(commission?.pais?.nombre, "Paraguay");
+  assert.equal(commission?.aranceles?.moneda, null);
+  assert.equal(commission?.aranceles?.moneda_simbolo, "Gs.");
+  assert.equal(commission?.aranceles?.moneda_nombre, "guaraníes");
+});
+
+test("a commission the CRM cannot place in a country is not a changed contract", async () => {
+  // The country is resolved from the organization, and a commission without a
+  // resolvable one must not break the detail of everything else.
+  const { pais: _pais, ...withoutCountry } = COMMISSION_2672;
+
+  const absent = await clientWith(
+    jsonFetch(200, { data: withoutCountry }),
+  ).getCommission(2672, false);
+  const nulled = await clientWith(
+    jsonFetch(200, { data: { ...COMMISSION_2672, pais: null } }),
+  ).getCommission(2672, false);
+
+  assert.equal(absent?.pais, undefined);
+  assert.equal(nulled?.pais, null);
+});
+
+test("fees without the currency wording are not a changed contract either", async () => {
+  // `moneda_simbolo` and `moneda_nombre` are newer than the deployment, so
+  // their absence is a CRM that has not caught up, not a broken shape.
+  const {
+    moneda_simbolo: _simbolo,
+    moneda_nombre: _nombre,
+    ...feesWithoutWording
+  } = COMMISSION_2672.aranceles;
+  const payload = {
+    data: { ...COMMISSION_2672, aranceles: feesWithoutWording },
+  };
+
+  const commission = await clientWith(jsonFetch(200, payload)).getCommission(
+    2672,
+    true,
+  );
+
+  assert.equal(commission?.aranceles?.moneda_simbolo, undefined);
+  assert.equal(commission?.aranceles?.moneda_nombre, undefined);
+  assert.equal(commission?.aranceles?.cuota_regular, 55000);
+});
+
+test("a currency wording the CRM does not have is null, not a missing key", async () => {
+  const payload = {
+    data: {
+      ...COMMISSION_2672,
+      aranceles: {
+        ...COMMISSION_2672.aranceles,
+        moneda_simbolo: null,
+        moneda_nombre: null,
+      },
+    },
+  };
+
+  const commission = await clientWith(jsonFetch(200, payload)).getCommission(
+    2672,
+    true,
+  );
+
+  assert.equal(commission?.aranceles?.moneda_simbolo, null);
+  assert.equal(commission?.aranceles?.moneda_nombre, null);
 });
 
 test("a foreign currency travels through untouched", async () => {

@@ -14,12 +14,17 @@ import {
  * Commission 2672 exactly as `/api-mcp` answered in production on 2026-09-24:
  * nulls instead of `"S/D"`, ISO dates, numbers as numbers, and the
  * certification fee absent because the business hides that amount.
+ *
+ * `moneda` is null for every commission: the CRM does not store the ISO 4217
+ * code. What it does answer is the country and the wording the organization
+ * uses for its money.
  */
 const COMMISSION: Commission = {
   id: 2672,
   codigo: "PRODUCCIÓN EXTENSIVA-D-OCTUBRE-2026",
   curso: { id: 28, nombre: "Producción Extensiva de Cereales y Oleaginosas" },
   organizacion: { id: 2, nombre: "Terra - Instituto de Formación Agropecuaria" },
+  pais: { iso: "ARG", nombre: "Argentina" },
   modalidad: "Online",
   es_virtual: true,
   estado: "inscripciones",
@@ -35,7 +40,9 @@ const COMMISSION: Commission = {
   pagina_web:
     "https://institutoterra.com.ar/produccion-extensiva-de-cereales-y-oleaginosas/",
   aranceles: {
-    moneda: "ARS",
+    moneda: null,
+    moneda_simbolo: "$",
+    moneda_nombre: "pesos",
     inscripcion_regular: 58000,
     inscripcion_promocionada: 29000,
     cuota_regular: 55000,
@@ -46,6 +53,79 @@ const COMMISSION: Commission = {
       "*Valor de la cuota con descuento abonando del 1 al 10 de cada mes",
   },
 };
+
+/**
+ * The three commissions measured in production on 2026-09-24, one per country.
+ *
+ * They are the reason the currency is never assumed: the symbol is whatever
+ * each organization typed — "Gs.", "UYU", "$" — so it is not a code, not a
+ * name, and nothing can be derived from it.
+ */
+const MEASURED: ReadonlyArray<{
+  commission: Commission;
+  pais: string;
+  moneda_nombre: string;
+}> = [
+  {
+    commission: {
+      ...COMMISSION,
+      id: 2694,
+      pais: { iso: "PRY", nombre: "Paraguay" },
+      aranceles: {
+        moneda: null,
+        moneda_simbolo: "Gs.",
+        moneda_nombre: "guaraníes",
+        inscripcion_regular: 140000,
+        inscripcion_promocionada: 70000,
+        cuota_regular: 120000,
+        cuota_promocionada: 95000,
+        nota_promocion: "*Valor de inscripción con el 50% de descuento.",
+      },
+    },
+    pais: "Paraguay",
+    moneda_nombre: "guaraníes",
+  },
+  {
+    commission: {
+      ...COMMISSION,
+      id: 2691,
+      pais: { iso: "URY", nombre: "Uruguay" },
+      aranceles: {
+        moneda: null,
+        moneda_simbolo: "UYU",
+        moneda_nombre: "pesos uruguayos",
+        inscripcion_promocionada: 490,
+        cuota_regular: 690,
+        cuota_promocionada: 590,
+        pago_unico: 2490,
+        nota_promocion: "*Valor de inscripción con el 50% de descuento.",
+      },
+    },
+    pais: "Uruguay",
+    moneda_nombre: "pesos uruguayos",
+  },
+  {
+    commission: {
+      ...COMMISSION,
+      id: 2678,
+      pais: { iso: "ARG", nombre: "Argentina" },
+      aranceles: {
+        moneda: null,
+        moneda_simbolo: "$",
+        moneda_nombre: "pesos",
+        inscripcion_regular: 58000,
+        inscripcion_promocionada: 29000,
+        cuota_regular: 49000,
+        cuota_promocionada: 39000,
+        pago_unico: 149000,
+        cuota_con_recargo: 49000,
+        nota_promocion: "*50% de descuento por inscripción temprana",
+      },
+    },
+    pais: "Argentina",
+    moneda_nombre: "pesos",
+  },
+];
 
 type ToolHandler = (args: {
   id_comision: number;
@@ -99,6 +179,7 @@ test("the commission is projected with the keys and the order of the design", ()
     "curso",
     "id_curso",
     "organizacion",
+    "pais",
     "modalidad",
     "es_virtual",
     "estado",
@@ -146,6 +227,7 @@ test("the keys follow the declared order, not the order of the payload", () => {
     "curso",
     "id_curso",
     "organizacion",
+    "pais",
     "modalidad",
     "es_virtual",
     "estado",
@@ -242,7 +324,8 @@ test("fees are opt-in, and a hidden amount stays absent", () => {
   const detail = toCommissionDetail(COMMISSION, true);
 
   assert.deepEqual(detail.aranceles, {
-    moneda: "ARS",
+    moneda_nombre: "pesos",
+    moneda_simbolo: "$",
     inscripcion_regular: 58000,
     inscripcion_promocionada: 29000,
     cuota_regular: 55000,
@@ -258,19 +341,25 @@ test("fees are opt-in, and a hidden amount stays absent", () => {
 });
 
 test("an unknown currency is never guessed: the amounts carry a warning instead", () => {
-  // The CRM answers null when it cannot determine the currency. Keeping a
-  // `moneda` key would force the agent to invent one, and four organizations
-  // across three countries do not share a currency.
+  // Nothing in the payload says what the amounts are denominated in: no ISO
+  // code, no name. Keeping a `moneda` key would force the agent to invent one,
+  // and four organizations across three countries do not share a currency.
+  const {
+    moneda_simbolo: _simbolo,
+    moneda_nombre: _nombre,
+    ...feesWithoutCurrency
+  } = COMMISSION.aranceles!;
   const detail = toCommissionDetail(
     {
       ...COMMISSION,
-      aranceles: { ...COMMISSION.aranceles!, moneda: null },
+      aranceles: { ...feesWithoutCurrency, moneda: null },
     },
     true,
   );
   const fees = (detail.aranceles ?? {}) as Record<string, unknown>;
 
   assert.ok(!("moneda" in fees));
+  assert.ok(!("moneda_nombre" in fees));
   assert.equal(
     fees["aviso_moneda"],
     "La moneda de estos montos no está informada: no la supongas.",
@@ -286,6 +375,8 @@ test("an unknown currency is never guessed: the amounts carry a warning instead"
 });
 
 test("a currency the CRM does know is relayed, with no warning", () => {
+  // The CRM does not store ISO 4217 codes today, but the contract still allows
+  // a non-null `moneda`, and a code that does arrive is stated as it came.
   const detail = toCommissionDetail(
     {
       ...COMMISSION,
@@ -297,6 +388,100 @@ test("a currency the CRM does know is relayed, with no warning", () => {
 
   assert.equal(fees["moneda"], "UYU");
   assert.ok(!("aviso_moneda" in fees));
+  // The currency block is read before any amount, and the code comes first.
+  assert.deepEqual(Object.keys(fees).slice(0, 3), [
+    "moneda",
+    "moneda_nombre",
+    "moneda_simbolo",
+  ]);
+});
+
+test("the three measured countries are stated from data, never assumed", () => {
+  for (const { commission, pais, moneda_nombre } of MEASURED) {
+    const detail = toCommissionDetail(commission, true);
+    const keys = Object.keys(detail);
+    const fees = (detail.aranceles ?? {}) as Record<string, unknown>;
+    const text = JSON.stringify(detail);
+
+    assert.equal(detail.pais, pais, `commission ${commission.id}`);
+    // Right after the organization, because the country is what makes the
+    // amounts of that organization readable.
+    assert.equal(keys[keys.indexOf("organizacion") + 1], "pais");
+    assert.equal(
+      fees["moneda_nombre"],
+      moneda_nombre,
+      `commission ${commission.id}`,
+    );
+    // The currency is named in words: there is nothing to warn about.
+    assert.ok(
+      !("aviso_moneda" in fees),
+      `commission ${commission.id} should carry no currency warning`,
+    );
+    // The CRM never sends "ARS" again, and this layer never invents it.
+    assert.ok(!text.includes("ARS"), `commission ${commission.id} leaked "ARS"`);
+  }
+});
+
+test("the currency wording is relayed as the CRM wrote it, symbol included", () => {
+  const paraguay = MEASURED[0]!;
+
+  const fees = (toCommissionDetail(paraguay.commission, true).aranceles ??
+    {}) as Record<string, unknown>;
+
+  assert.ok(!("moneda" in fees));
+  assert.equal(fees["moneda_nombre"], "guaraníes");
+  // "Gs." is not an ISO code and "UYU" is not a symbol: the field is whatever
+  // each organization typed, so it is relayed and nothing is derived from it.
+  assert.equal(fees["moneda_simbolo"], "Gs.");
+  assert.deepEqual(Object.keys(fees).slice(0, 2), [
+    "moneda_nombre",
+    "moneda_simbolo",
+  ]);
+  assert.equal(fees["inscripcion_regular"], 140000);
+  assert.equal(
+    fees["nota_promocion"],
+    "*Valor de inscripción con el 50% de descuento.",
+  );
+});
+
+test("a symbol alone does not name a currency: the warning stays", () => {
+  // "$" is Argentine pesos, Uruguayan pesos and a dollar at the same time. A
+  // symbol is not an answer to "which currency is this".
+  const detail = toCommissionDetail(
+    {
+      ...COMMISSION,
+      aranceles: {
+        ...COMMISSION.aranceles!,
+        moneda: null,
+        moneda_nombre: null,
+        moneda_simbolo: "$",
+      },
+    },
+    true,
+  );
+  const fees = (detail.aranceles ?? {}) as Record<string, unknown>;
+
+  assert.equal(fees["moneda_simbolo"], "$");
+  assert.equal(
+    fees["aviso_moneda"],
+    "La moneda de estos montos no está informada: no la supongas.",
+  );
+});
+
+test("a commission the CRM cannot place in a country simply has no country", () => {
+  const { pais: _pais, ...withoutCountry } = COMMISSION;
+
+  const absent = toCommissionDetail(withoutCountry, false) as Record<
+    string,
+    unknown
+  >;
+  const nulled = toCommissionDetail({ ...COMMISSION, pais: null }, false) as Record<
+    string,
+    unknown
+  >;
+
+  assert.ok(!("pais" in absent));
+  assert.ok(!("pais" in nulled));
 });
 
 test("a commission whose fees were not sent has no fee block", () => {

@@ -15,14 +15,23 @@ export type CommissionReader = Pick<ApiMcpClient, "getCommission">;
  * amounts that came through are projected, with their currency and the note
  * that qualifies the promotional ones.
  *
- * Exactly one of `moneda` and `aviso_moneda` is present. The agent serves four
- * organizations across three countries, so an amount without its currency is
- * not a number it can state: when the CRM does not know the currency, the
- * warning takes the currency's place and says so in words the model cannot
- * mistake for a value.
+ * The currency is stated only from data, never assumed. The CRM does not store
+ * ISO 4217 codes, so what usually arrives is how the organization writes its
+ * money: `moneda_nombre` ("guaraníes") and `moneda_simbolo` ("Gs."). A name is
+ * an answer to "which currency is this"; a symbol is not, because "$" is
+ * Argentine pesos, Uruguayan pesos and a dollar at the same time, so it is
+ * relayed as context and never counted as the answer.
+ *
+ * `aviso_moneda` appears only when neither `moneda` nor `moneda_nombre` is
+ * there. The agent serves four organizations across three countries, so an
+ * amount whose currency nobody stated is not a number it can present: the
+ * warning takes the currency's place in words the model cannot mistake for a
+ * value.
  */
 export interface CommissionFees {
   moneda?: string;
+  moneda_nombre?: string;
+  moneda_simbolo?: string;
   aviso_moneda?: string;
   inscripcion_regular?: number;
   inscripcion_promocionada?: number;
@@ -49,6 +58,7 @@ export interface CommissionDetail {
   curso: string;
   id_curso: number;
   organizacion: string;
+  pais?: string;
   modalidad?: string;
   es_virtual: boolean;
   estado?: string;
@@ -86,9 +96,9 @@ function present<K extends string, V>(
     : ({ [key]: value } as { [P in K]?: V });
 }
 
-/** `null` and blank text are the same absence. */
-function orUndefined(value: string | null): string | undefined {
-  if (value === null) return undefined;
+/** `null`, absent and blank text are the same absence. */
+function orUndefined(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed === "" ? undefined : trimmed;
 }
@@ -134,16 +144,30 @@ const UNKNOWN_CURRENCY_WARNING =
 /**
  * Projects the fees, keeping only the amounts the CRM actually published.
  *
- * The currency slot comes first either way, so the agent reads what the
- * amounts are denominated in — or that nobody knows — before reading any
- * amount at all.
+ * The currency block comes first either way, so the agent reads what the
+ * amounts are denominated in — or that nobody said — before reading any amount
+ * at all. Inside it the order is how much each datum answers the question: the
+ * ISO code, then the name, then the symbol, which is context and not an
+ * answer.
  */
 function toFees(fees: Fees | undefined): CommissionFees | undefined {
   if (fees === undefined) return undefined;
+  const code = orUndefined(fees.moneda);
+  const name = orUndefined(fees.moneda_nombre);
+  const symbol = orUndefined(fees.moneda_simbolo);
+
   return {
-    ...(fees.moneda === null
-      ? { aviso_moneda: UNKNOWN_CURRENCY_WARNING }
-      : { moneda: fees.moneda }),
+    ...present("moneda", code),
+    ...present("moneda_nombre", name),
+    ...present("moneda_simbolo", symbol),
+    // The symbol alone never silences the warning: it is inconsistent across
+    // countries ("Gs.", "UYU", "$") and nothing can be derived from it.
+    ...present(
+      "aviso_moneda",
+      code === undefined && name === undefined
+        ? UNKNOWN_CURRENCY_WARNING
+        : undefined,
+    ),
     ...present("inscripcion_regular", fees.inscripcion_regular),
     ...present("inscripcion_promocionada", fees.inscripcion_promocionada),
     ...present("cuota_regular", fees.cuota_regular),
@@ -177,6 +201,10 @@ export function toCommissionDetail(
     id_curso: commission.curso.id,
     // Shown as the CRM wrote it: title case would produce "De Formación".
     organizacion: commission.organizacion.nombre.trim(),
+    // The country is what makes the amounts of an organization readable, so it
+    // is read right next to it. A commission the CRM cannot place simply has
+    // no country: the key is absent, never a null to interpret.
+    ...present("pais", orUndefined(commission.pais?.nombre)),
     ...present("modalidad", toLowerText(commission.modalidad)),
     es_virtual: commission.es_virtual,
     ...present("estado", toLowerText(commission.estado)),

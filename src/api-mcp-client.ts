@@ -33,6 +33,19 @@ const referenceSchema = z.object({
 });
 
 /**
+ * The country a commission belongs to, resolved from its organization.
+ *
+ * `iso` is the ISO 3166 country code (`"PRY"`, `"URY"`, `"ARG"`), never a
+ * currency: the CRM has no currency code to give. It is optional and nullable
+ * because the country is derived, and a commission the CRM cannot place must
+ * not break every other datum it does have.
+ */
+const countrySchema = z.object({
+  iso: z.string(),
+  nombre: z.string(),
+});
+
+/**
  * A course on offer.
  *
  * `organizacion` is optional on purpose: the CRM is adding it right now (asked
@@ -54,13 +67,24 @@ const courseSchema = z.object({
  * a hidden fee is *absent*, not null.
  *
  * The currency is always present as a key, but its value may be `null`: the
- * CRM answers the ISO 4217 code when it can determine one and `null` when it
- * cannot. It used to answer `"ARS"` for every commission, which was false for
+ * CRM does not store the ISO 4217 code, so today it is `null` for every
+ * commission. It used to answer `"ARS"` for all of them, which was false for
  * the Uruguayan and Paraguayan organizations, so an honest `null` is data the
- * tools must relay, not a contract that moved. A *missing* key still is one.
+ * tools must relay, not a contract that moved. A *missing* key still is one,
+ * and the key stays `string | null` so a code the CRM ever does resolve keeps
+ * travelling through.
+ *
+ * What the CRM does store is how each organization writes its money:
+ * `moneda_nombre` (`"guaraníes"`, `"pesos uruguayos"`, `"pesos"`) and
+ * `moneda_simbolo` (`"Gs."`, `"UYU"`, `"$"`). Both are optional — older
+ * deployments do not send them — and nullable. The symbol is inconsistent
+ * across countries on purpose: it is whatever the operator typed, so it is
+ * relayed and never interpreted.
  */
 const feesSchema = z.object({
   moneda: z.string().nullable(),
+  moneda_simbolo: z.string().nullable().optional(),
+  moneda_nombre: z.string().nullable().optional(),
   inscripcion_regular: z.number().optional(),
   inscripcion_promocionada: z.number().optional(),
   cuota_regular: z.number().optional(),
@@ -83,6 +107,7 @@ const commissionSchema = z.object({
   codigo: z.string(),
   curso: referenceSchema,
   organizacion: referenceSchema,
+  pais: countrySchema.nullable().optional(),
   modalidad: z.string().nullable(),
   es_virtual: z.boolean(),
   estado: z.string().nullable(),
@@ -121,12 +146,19 @@ const pageSchema = z.object({
 });
 
 /**
- * `cursos_disponibles` also answers a `page`, but the whole catalogue fits in
- * one response and this client does not paginate it. Not validating a field
- * nobody reads keeps an additive change to the pagination from breaking a
- * listing that does not depend on it.
+ * `cursos_disponibles` also answers a `page`, and today the whole catalogue
+ * fits in one response (`has_more: false`). This client does not paginate it.
+ *
+ * The page is validated, and optional so a deployment that does not send it is
+ * not a broken contract. It is read for one reason: if the CRM ever starts
+ * paginating this action, answering the first page as if it were the catalogue
+ * would make the agent state that a course does not exist. That silent half
+ * answer is the failure worth being loud about.
  */
-const coursesResponseSchema = z.object({ data: z.array(courseSchema) });
+const coursesResponseSchema = z.object({
+  data: z.array(courseSchema),
+  page: pageSchema.optional(),
+});
 
 const commissionResponseSchema = z.object({ data: commissionSchema });
 
@@ -135,6 +167,7 @@ const searchResponseSchema = z.object({
   page: pageSchema,
 });
 
+export type Country = z.infer<typeof countrySchema>;
 export type Course = z.infer<typeof courseSchema>;
 export type Fees = z.infer<typeof feesSchema>;
 export type Commission = z.infer<typeof commissionSchema>;
@@ -412,11 +445,26 @@ export class ApiMcpClient {
     );
   }
 
-  /** Lists the courses on offer, across the four organizations. */
+  /**
+   * Lists the courses on offer, across the four organizations.
+   *
+   * A paginated answer is refused instead of truncated: this client does not
+   * follow cursors, so the only honest outcome is to fail where the technical
+   * team can see it, never to hand the agent a first page that looks like the
+   * whole catalogue.
+   */
   async listCourses(): Promise<Course[]> {
     const action = "cursos_disponibles";
     const payload = await this.call(action);
-    return this.#validate(action, coursesResponseSchema, payload).data;
+    const response = this.#validate(action, coursesResponseSchema, payload);
+    if (response.page?.has_more === true) {
+      throw new ApiMcpError(
+        "contract_changed",
+        `The action "${action}" answered a paginated listing, and this client does not paginate it: the courses beyond the first page would be missing without anyone noticing.`,
+        200,
+      );
+    }
+    return response.data;
   }
 
   /**
