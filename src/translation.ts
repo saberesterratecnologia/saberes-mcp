@@ -40,6 +40,24 @@ export function toSentenceCase(value: string): string {
 }
 
 /**
+ * Normalizes a name `/api-mcp` sends for display.
+ *
+ * The new endpoint already stores names the way they should be read — "Terra -
+ * Instituto de Formación Agropecuaria", "Producción Extensiva de Cereales y
+ * Oleaginosas" — so re-casing them would only destroy information: title case
+ * would capitalize "de", and sentence case would lower-case the proper nouns.
+ *
+ * A handful of course names are still loaded shouted ("GESTIÓN CONTABLE
+ * APLICADA AL AGRO"). Those carry no capitalization to preserve, because there
+ * is no lower-case letter anywhere in them, and only those are rewritten into
+ * Spanish sentence case. Everything else is returned trimmed and untouched.
+ */
+export function normalizeDisplayName(value: string): string {
+  const trimmed = value.trim();
+  return /\p{Ll}/u.test(trimmed) ? trimmed : toSentenceCase(trimmed);
+}
+
+/**
  * Organization names are proper nouns, so every word is capitalized. They are
  * short and known — "Instituto Terra", "Fundación Saberes" — so there is no
  * minor-word problem to solve here.

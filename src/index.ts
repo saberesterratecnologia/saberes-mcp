@@ -1,11 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
-import { SaberesClient } from "./saberes-client.ts";
+import { ApiMcpClient } from "./api-mcp-client.ts";
+import { registerBuscarComision } from "./tools/buscar-comision.ts";
 import { registerDetalleComision } from "./tools/detalle-comision.ts";
 import { registerListarCursos } from "./tools/listar-cursos.ts";
 
-const DEFAULT_API_URL = "https://saberes.com.ar/api";
+/**
+ * `/api-mcp` is the endpoint built for this server: it answers data instead of
+ * CRM presentation. `/api` is no longer used by any tool.
+ */
+const DEFAULT_API_URL = "https://saberes.com.ar/api-mcp";
 
 /**
  * Reads the token from the environment.
@@ -26,7 +31,7 @@ function requireToken(): string {
   return token;
 }
 
-const client = new SaberesClient({
+const client = new ApiMcpClient({
   baseUrl: process.env["SABERES_API_URL"]?.trim() || DEFAULT_API_URL,
   token: requireToken(),
 });
@@ -34,6 +39,7 @@ const client = new SaberesClient({
 const server = new McpServer({ name: "saberes-mcp", version: "0.1.0" });
 
 registerListarCursos(server, client);
+registerBuscarComision(server, client);
 registerDetalleComision(server, client);
 
 await server.connect(new StdioServerTransport());

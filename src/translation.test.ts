@@ -6,6 +6,7 @@ import { SaberesApiError } from "./saberes-client.ts";
 import {
   describeFailure,
   dropSentinel,
+  normalizeDisplayName,
   toIsoDate,
   toPositiveInteger,
   toProperNoun,
@@ -29,6 +30,44 @@ test("sentence case keeps the Spanish convention of one capital", () => {
 test("proper nouns capitalize every word and preserve the spacing", () => {
   assert.equal(toProperNoun("INSTITUTO TERRA"), "Instituto Terra");
   assert.equal(toProperNoun("FUNDACIÓN  SABERES"), "Fundación  Saberes");
+});
+
+test("a name shouted in upper case is brought back to sentence case", () => {
+  // `/api-mcp` sends most names in Title Case, but a few arrive shouted.
+  assert.equal(
+    normalizeDisplayName("GESTIÓN CONTABLE APLICADA AL AGRO"),
+    "Gestión contable aplicada al agro",
+  );
+  assert.equal(
+    normalizeDisplayName("LIDERAZGO Y GERENCIA EN LA AGROINDUSTRIA"),
+    "Liderazgo y gerencia en la agroindustria",
+  );
+});
+
+test("a name that already has lower case is left exactly as it came", () => {
+  // Re-casing it would destroy the CRM's own capitalization, which is right
+  // far more often than a blind rule would be.
+  assert.equal(
+    normalizeDisplayName("Producción Extensiva de Cereales y Oleaginosas"),
+    "Producción Extensiva de Cereales y Oleaginosas",
+  );
+  assert.equal(
+    normalizeDisplayName("Terra - Instituto de Formación Agropecuaria"),
+    "Terra - Instituto de Formación Agropecuaria",
+  );
+  assert.equal(normalizeDisplayName("Apicultura"), "Apicultura");
+});
+
+test("a display name is always trimmed, whichever branch it takes", () => {
+  assert.equal(normalizeDisplayName("  Apicultura  "), "Apicultura");
+  assert.equal(normalizeDisplayName("  APICULTURA  "), "Apicultura");
+  assert.equal(normalizeDisplayName(""), "");
+  assert.equal(normalizeDisplayName("   "), "");
+});
+
+test("a name without letters is not mangled by the upper-case branch", () => {
+  assert.equal(normalizeDisplayName("2026"), "2026");
+  assert.equal(normalizeDisplayName("AGRO 2026"), "Agro 2026");
 });
 
 test("R2: the sentinel and the empty values become absent", () => {

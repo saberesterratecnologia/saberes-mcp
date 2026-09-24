@@ -3,58 +3,48 @@ import assert from "node:assert/strict";
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import {
-  SaberesApiError,
-  type RawCommission,
-  type SaberesClient,
-} from "../saberes-client.ts";
+import { ApiMcpError, type Commission } from "../api-mcp-client.ts";
 import {
   registerDetalleComision,
   toCommissionDetail,
+  type CommissionReader,
 } from "./detalle-comision.ts";
 
 /**
- * Commission 2672 exactly as production answered on 2026-09-23, except for the
- * three free-text fields the tool must never project: they carry obviously fake
- * placeholders so a leak is visible in the assertions instead of plausible.
+ * Commission 2672 exactly as `/api-mcp` answered in production on 2026-09-24:
+ * nulls instead of `"S/D"`, ISO dates, numbers as numbers, and the
+ * certification fee absent because the business hides that amount.
  */
-const RAW: RawCommission = {
-  id_comision: 2672,
-  id_curso: 28,
-  Organizacion: "INSTITUTO TERRA",
-  Comision: "PRODUCCIÓN EXTENSIVA-D-OCTUBRE-2026",
-  Curso: "PRODUCCIÓN EXTENSIVA DE CEREALES Y OLEAGINOSAS",
-  Modalidad: "ONLINE",
-  Estado_de_la_comisión: "INSCRIPCIONES",
-  Carga_horaria_certificada: "64 horas",
-  Categoria: "AGROINDUSTRIALES",
-  Institución_Gestora: "TERRA INSTITUTO DE FORMACIÓN AGROPECUARIA",
-  Institución_Certificadora: "UNIVERSIDAD CATÓLICA DE CUYO",
-  Institución_Capacitadora: "TERRA INSTITUTO DE FORMACIÓN AGROPECUARIA",
-  Localidad_de_cursado: "S/D",
-  Lugar_de_cursado: "S/D",
-  Domicilio_de_la_sede: "S/D",
-  URL_MAPS: "S/D",
-  Fecha_Hora_Inicio: "15/10/2026",
-  Duración_en_meses: "4",
-  Charla_Informativa: "Sin charla programada",
-  Primera_Clase: "S/D",
-  Segunda_Clase: "S/D",
-  Horarios_de_cursado: "online - desde la comodidad de tu hogar",
-  Valor_de_la_inscripcion_regular: "$ 58.000",
-  Valor_de_la_inscripción_promocionada:
-    "$ 29.000 (*VALOR DE LA CUOTA CON DESCUENTO ABONANDO DEL 1 AL 10 DE CADA MES)",
-  Valor_de_la_cuota_regular: "$ 55.000",
-  Valor_de_la_cuota_promocionada:
-    "$ 45.000 (*VALOR DE LA CUOTA CON DESCUENTO ABONANDO DEL 1 AL 10 DE CADA MES)",
-  Valor_del_pago_unico: "$ 159.000",
-  Valor_de_la_cuota_con_recargo: "$ 55.000",
-  Valor_de_la_certificacion: "$ 90.000",
-  Página_web_del_curso:
+const COMMISSION: Commission = {
+  id: 2672,
+  codigo: "PRODUCCIÓN EXTENSIVA-D-OCTUBRE-2026",
+  curso: { id: 28, nombre: "Producción Extensiva de Cereales y Oleaginosas" },
+  organizacion: { id: 2, nombre: "Terra - Instituto de Formación Agropecuaria" },
+  modalidad: "Online",
+  es_virtual: true,
+  estado: "inscripciones",
+  disponible: true,
+  localidad: null,
+  sede: null,
+  inicio: "2026-10-15",
+  duracion_meses: 4,
+  horarios: "Online - Desde la comodidad de tu hogar",
+  carga_horaria_horas: 64,
+  primera_clase: null,
+  charla_informativa: null,
+  pagina_web:
     "https://institutoterra.com.ar/produccion-extensiva-de-cereales-y-oleaginosas/",
-  Enlace_invitación_grupo_de_Whatsapp: "https://chat.whatsapp.com/FAKE",
-  bot_contexto_operativo: "SECRET-CONTEXT",
-  bot_contexto_operativo_curso: "SECRET-CONTEXT",
+  aranceles: {
+    moneda: "ARS",
+    inscripcion_regular: 58000,
+    inscripcion_promocionada: 29000,
+    cuota_regular: 55000,
+    cuota_promocionada: 45000,
+    pago_unico: 159000,
+    cuota_con_recargo: 55000,
+    nota_promocion:
+      "*Valor de la cuota con descuento abonando del 1 al 10 de cada mes",
+  },
 };
 
 type ToolHandler = (args: {
@@ -66,7 +56,7 @@ type ToolHandler = (args: {
 }>;
 
 /** Registers the tool on a server double and returns what the SDK received. */
-function registered(client: Pick<SaberesClient, "getCommission">): {
+function registered(client: CommissionReader): {
   name: string;
   config: { description?: string; inputSchema?: unknown };
   handler: ToolHandler;
@@ -76,20 +66,22 @@ function registered(client: Pick<SaberesClient, "getCommission">): {
     | undefined;
 
   const server = {
-    registerTool(name: string, config: { description?: string }, handler: unknown) {
+    registerTool(
+      name: string,
+      config: { description?: string },
+      handler: unknown,
+    ) {
       captured = { name, config, handler: handler as ToolHandler };
     },
   } as unknown as McpServer;
 
-  registerDetalleComision(server, client as SaberesClient);
+  registerDetalleComision(server, client);
   assert.ok(captured, "the tool was never registered");
   return captured;
 }
 
 /** A client double that answers one commission, `null`, or a failure. */
-function clientAnswering(
-  answer: RawCommission | null | Error,
-): Pick<SaberesClient, "getCommission"> {
+function clientAnswering(answer: Commission | null | Error): CommissionReader {
   return {
     async getCommission() {
       if (answer instanceof Error) throw answer;
@@ -98,27 +90,96 @@ function clientAnswering(
   };
 }
 
-test("the wire shape is projected into the agent-facing detail", () => {
-  const detail = toCommissionDetail(RAW, false);
+test("the commission is projected with the keys and the order of the design", () => {
+  const detail = toCommissionDetail(COMMISSION, false);
 
-  assert.deepEqual(detail, {
-    id: 2672,
-    nombre: "PRODUCCIÓN EXTENSIVA-D-OCTUBRE-2026",
-    curso: "Producción extensiva de cereales y oleaginosas",
-    organizacion: "Instituto Terra",
-    modalidad: "online",
-    estado: "inscripciones",
-    inicio: "2026-10-15",
-    duracion_meses: 4,
-    horarios: "online - desde la comodidad de tu hogar",
-    carga_horaria: "64 horas",
-    pagina_web:
-      "https://institutoterra.com.ar/produccion-extensiva-de-cereales-y-oleaginosas/",
-  });
+  assert.deepEqual(Object.keys(detail), [
+    "id",
+    "nombre",
+    "curso",
+    "id_curso",
+    "organizacion",
+    "modalidad",
+    "es_virtual",
+    "estado",
+    "disponible",
+    "inicio",
+    "duracion_meses",
+    "horarios",
+    "carga_horaria",
+    "pagina_web",
+  ]);
+
+  assert.equal(detail.id, 2672);
+  assert.equal(detail.nombre, "PRODUCCIÓN EXTENSIVA-D-OCTUBRE-2026");
+  assert.equal(detail.curso, "Producción Extensiva de Cereales y Oleaginosas");
+  assert.equal(detail.id_curso, 28);
+  // The organization is shown as the CRM wrote it: title case would produce
+  // "Terra - Instituto De Formación Agropecuaria".
+  assert.equal(
+    detail.organizacion,
+    "Terra - Instituto de Formación Agropecuaria",
+  );
+  assert.equal(detail.modalidad, "online");
+  assert.equal(detail.es_virtual, true);
+  assert.equal(detail.estado, "inscripciones");
+  assert.equal(detail.disponible, true);
+  assert.equal(detail.duracion_meses, 4);
+  assert.equal(detail.carga_horaria, "64 horas");
 });
 
-test("the sentinel and the free-text date become absent keys, never null", () => {
-  const detail = toCommissionDetail(RAW, false) as Record<string, unknown>;
+test("the keys follow the declared order, not the order of the payload", () => {
+  const detail = toCommissionDetail(
+    {
+      ...COMMISSION,
+      localidad: "Córdoba",
+      sede: "Sede Centro",
+      primera_clase: "2026-10-20",
+      charla_informativa: { fecha: "2026-10-01", hora: null },
+    },
+    true,
+  );
+
+  assert.deepEqual(Object.keys(detail), [
+    "id",
+    "nombre",
+    "curso",
+    "id_curso",
+    "organizacion",
+    "modalidad",
+    "es_virtual",
+    "estado",
+    "disponible",
+    "localidad",
+    "sede",
+    "inicio",
+    "duracion_meses",
+    "horarios",
+    "carga_horaria",
+    "primera_clase",
+    "charla_informativa",
+    "pagina_web",
+    "aranceles",
+  ]);
+});
+
+test("a course name that arrives shouted is read as a sentence", () => {
+  const detail = toCommissionDetail(
+    {
+      ...COMMISSION,
+      curso: { id: 131, nombre: "GESTIÓN CONTABLE APLICADA AL AGRO" },
+    },
+    false,
+  );
+
+  assert.equal(detail.curso, "Gestión contable aplicada al agro");
+});
+
+test("a null is an absent key, never a null in the JSON", () => {
+  const detail = toCommissionDetail(COMMISSION, false) as Record<
+    string,
+    unknown
+  >;
 
   for (const key of ["localidad", "sede", "primera_clase", "charla_informativa"]) {
     assert.ok(!(key in detail), `${key} should have been omitted`);
@@ -126,81 +187,124 @@ test("the sentinel and the free-text date become absent keys, never null", () =>
   assert.ok(!JSON.stringify(detail).includes("null"));
 });
 
-test("fees are opt-in and arrive as text, unparsed", () => {
-  const withoutFees = toCommissionDetail(RAW, false) as Record<string, unknown>;
-  assert.ok(!("aranceles" in withoutFees));
+test("a commission that is not published carries an explicit warning", () => {
+  const detail = toCommissionDetail(
+    { ...COMMISSION, disponible: false },
+    false,
+  );
+  const keys = Object.keys(detail);
 
-  const detail = toCommissionDetail(RAW, true);
-
-  assert.deepEqual(detail.aranceles, {
-    inscripcion_regular: "$ 58.000",
-    inscripcion_promocionada:
-      "$ 29.000 (*VALOR DE LA CUOTA CON DESCUENTO ABONANDO DEL 1 AL 10 DE CADA MES)",
-    cuota_regular: "$ 55.000",
-    cuota_promocionada:
-      "$ 45.000 (*VALOR DE LA CUOTA CON DESCUENTO ABONANDO DEL 1 AL 10 DE CADA MES)",
-    pago_unico: "$ 159.000",
-    cuota_con_recargo: "$ 55.000",
-    certificacion: "$ 90.000",
-  });
-  assert.equal(Object.keys(detail.aranceles ?? {}).length, 7);
+  assert.equal(detail.disponible, false);
+  assert.equal(
+    detail.aviso,
+    "Esta comisión no está publicada en el catálogo actual.",
+  );
+  // Right after `disponible`, so the agent reads the caveat with the fact.
+  assert.equal(keys[keys.indexOf("disponible") + 1], "aviso");
 });
 
-test("a commission without any fee loses the whole fee object", () => {
-  const detail = toCommissionDetail(
-    {
-      ...RAW,
-      Valor_de_la_inscripcion_regular: "S/D",
-      Valor_de_la_inscripción_promocionada: null,
-      Valor_de_la_cuota_regular: "",
-      Valor_de_la_cuota_promocionada: "S/D",
-      Valor_del_pago_unico: null,
-      Valor_de_la_cuota_con_recargo: "S/D",
-      Valor_de_la_certificacion: "S/D",
-    },
-    true,
+test("an available commission carries no warning", () => {
+  const detail = toCommissionDetail(COMMISSION, false) as Record<
+    string,
+    unknown
+  >;
+
+  assert.ok(!("aviso" in detail));
+});
+
+test("the informative talk keeps its time only when there is one", () => {
+  const withTime = toCommissionDetail(
+    { ...COMMISSION, charla_informativa: { fecha: "2026-10-01", hora: "19:00" } },
+    false,
+  );
+  const withoutTime = toCommissionDetail(
+    { ...COMMISSION, charla_informativa: { fecha: "2026-10-01", hora: null } },
+    false,
+  );
+  const withoutDate = toCommissionDetail(
+    { ...COMMISSION, charla_informativa: { fecha: null, hora: "19:00" } },
+    false,
   ) as Record<string, unknown>;
+
+  assert.equal(withTime.charla_informativa, "2026-10-01 19:00");
+  assert.equal(withoutTime.charla_informativa, "2026-10-01");
+  // A time without a date is not a date the agent can relay.
+  assert.ok(!("charla_informativa" in withoutDate));
+});
+
+test("fees are opt-in, and a hidden amount stays absent", () => {
+  const withoutFees = toCommissionDetail(COMMISSION, false) as Record<
+    string,
+    unknown
+  >;
+  assert.ok(!("aranceles" in withoutFees));
+
+  const detail = toCommissionDetail(COMMISSION, true);
+
+  assert.deepEqual(detail.aranceles, {
+    moneda: "ARS",
+    inscripcion_regular: 58000,
+    inscripcion_promocionada: 29000,
+    cuota_regular: 55000,
+    cuota_promocionada: 45000,
+    pago_unico: 159000,
+    cuota_con_recargo: 55000,
+    nota_promocion:
+      "*Valor de la cuota con descuento abonando del 1 al 10 de cada mes",
+  });
+  // The business hides the certification fee: it is not there and is not
+  // invented as a null either.
+  assert.ok(!("certificacion" in (detail.aranceles ?? {})));
+});
+
+test("a commission whose fees were not sent has no fee block", () => {
+  const { aranceles: _aranceles, ...withoutFees } = COMMISSION;
+
+  const detail = toCommissionDetail(withoutFees, true) as Record<
+    string,
+    unknown
+  >;
 
   assert.ok(!("aranceles" in detail));
 });
 
-test("a localidad with a real value is cased as a proper noun", () => {
-  const detail = toCommissionDetail(
-    { ...RAW, Localidad_de_cursado: "SAN JUAN", Lugar_de_cursado: "SEDE CENTRAL" },
-    false,
-  );
+test("the tool is registered with the name and the parameters of the design", () => {
+  const { name, config } = registered(clientAnswering(COMMISSION));
 
-  assert.equal(detail.localidad, "San Juan");
-  assert.equal(detail.sede, "Sede Central");
+  assert.equal(name, "detalle_comision");
+  assert.match(String(config.description), /identificador numérico/);
+  assert.match(String(config.description), /buscar_comision/);
 });
 
-test("the operational context, the Whatsapp link and the institutions never leak", async () => {
-  const { handler } = registered(clientAnswering(RAW));
+test("the input schema is strict: an unknown parameter is rejected", () => {
+  const { config } = registered(clientAnswering(COMMISSION));
+  const schema = config.inputSchema as {
+    safeParse: (value: unknown) => { success: boolean };
+  };
+
+  assert.equal(schema.safeParse({ id_comision: 2672 }).success, true);
+  assert.equal(schema.safeParse({ id_comision: 0 }).success, false);
+  assert.equal(schema.safeParse({ id_comision: 1.5 }).success, false);
+  assert.equal(schema.safeParse({ id_comision: "2672" }).success, false);
+  assert.equal(
+    schema.safeParse({ id_comision: 2672, incluir_aranceles: true }).success,
+    true,
+  );
+  assert.equal(
+    schema.safeParse({ id_comision: 2672, otro: "x" }).success,
+    false,
+  );
+});
+
+test("the detail reaches the agent as indented JSON", async () => {
+  const { handler } = registered(clientAnswering(COMMISSION));
 
   const result = await handler({ id_comision: 2672, incluir_aranceles: true });
   const text = result.content[0]?.text ?? "";
 
   assert.equal(result.isError, undefined);
-  for (const forbidden of [
-    "S/D",
-    "SECRET-CONTEXT",
-    "whatsapp",
-    "Institución",
-    "UNIVERSIDAD",
-    "AGROINDUSTRIALES",
-    "bot_contexto",
-  ]) {
-    assert.ok(!text.includes(forbidden), `${forbidden} leaked into the output`);
-  }
   assert.equal(JSON.parse(text).id, 2672);
-});
-
-test("the tool is registered with the name and the parameters of the design", () => {
-  const { name, config } = registered(clientAnswering(RAW));
-
-  assert.equal(name, "detalle_comision");
-  assert.match(String(config.description), /identificador numérico/);
-  assert.match(String(config.description), /buscar_comision/);
+  assert.ok(text.includes("\n  "), "the JSON should be indented");
 });
 
 test("a commission that does not exist is explained, not reported as an error", async () => {
@@ -215,10 +319,23 @@ test("a commission that does not exist is explained, not reported as an error", 
   );
 });
 
-test("an error envelope is a failure, never a commission that does not exist", async () => {
+test("a failure is never answered as a commission that does not exist", async () => {
+  const { handler } = registered(
+    clientAnswering(new ApiMcpError("server_error", "internal detail", 500)),
+  );
+
+  const result = await handler({ id_comision: 2672 });
+
+  assert.equal(result.isError, true);
+  const text = result.content[0]?.text ?? "";
+  assert.ok(!text.includes("No existe"), text);
+  assert.ok(!text.includes("internal detail"));
+});
+
+test("a changed contract is reported without the internal wording", async () => {
   const { handler } = registered(
     clientAnswering(
-      new SaberesApiError("api_error", 'The API answered 200 with result "error".', 200),
+      new ApiMcpError("contract_changed", "field data.organizacion", 200),
     ),
   );
 
@@ -226,21 +343,6 @@ test("an error envelope is a failure, never a commission that does not exist", a
 
   assert.equal(result.isError, true);
   const text = result.content[0]?.text ?? "";
-  // Answering "it does not exist" here would be a confident lie: the API never
-  // said that, it said something went wrong.
-  assert.ok(!text.includes("No existe"), text);
-  assert.match(text, /rechaz\u00f3/);
-});
-
-test("a failure is reported without the internal wording", async () => {
-  const { handler } = registered(
-    clientAnswering(new SaberesApiError("authentication_failed", "internal detail")),
-  );
-
-  const result = await handler({ id_comision: 2672 });
-
-  assert.equal(result.isError, true);
-  const text = result.content[0]?.text ?? "";
   assert.ok(text.length > 0);
-  assert.ok(!text.includes("internal detail"));
+  assert.ok(!text.includes("data.organizacion"));
 });
