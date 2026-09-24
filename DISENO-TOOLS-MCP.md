@@ -1,12 +1,14 @@
 # Diseño de Tools — MCP Server Saberes
 
-**Versión:** 1.2
+**Versión:** 1.3
 **Fecha:** Septiembre 2026
 **Alcance:** Fase 1 — Secretaría Académica, solo lectura
 **Revisión de protocolo MCP:** 2026-07-28
 **Documento padre:** `PROPUESTA-AGENTES-IA.md` v2.5
 
 Artefacto de implementación. Define el contrato exacto de las cuatro tools de la Fase 1, su mapeo a las acciones de `POST /api`, las reglas de traducción y el manejo de errores.
+
+> **Cambios de la v1.3 (24/09/2026).** El CRM corrigió el contrato de errores el 21/09: todos los errores vuelven en JSON con su status real y el token inválido es un 401 (ver §3). Corregida la tabla de Tool 3, que en la v1.2 afirmaba "400 con HTML" sin haberlo medido.
 
 > **Cambios de la v1.2 (23/09/2026).** `detalle_comision` implementada y verificada contra producción. El contrato medido de `recuperar_comision_x_id` difiere del ejemplo original en casing, formato de fecha, tipo de la duración y tildes de los `Valor_*`: ver [Contrato medido](#contrato-medido-contra-producción-23092026). Las reglas R1–R5 quedaron como módulo compartido; R6 llega con `buscar_comision`.
 
@@ -139,11 +141,22 @@ Toda tool que pueda devolver una colección declara `max_resultados`. Si el conj
 
 ## 3. Manejo de errores
 
-### 🔴 La regla que manda: solo el `200` devuelve JSON
+### 🔴 La regla que manda: rutear por status code
 
 **Medido contra producción el 18/09/2026.** El handler de la aplicación escribe un cuerpo JSON correcto en cada error, pero **la configuración de IIS lo descarta**: `ConIgCba/Web.config` usa `<httpErrors errorMode="Custom" existingResponse="Replace">`, y `Replace` **le gana** a `TrySkipIisCustomErrors`. Además el `401` está mapeado a `/401.aspx`, que vuelve a setear `401` sin la supresión, y ahí forms auth lo convierte en un `302` al login.
 
-Lo que realmente devuelve la API:
+> ✅ **Actualización 24/09/2026 — el contrato de errores se corrigió en el CRM.** El 21/09 a las 16:00 se deployó `existingResponse="Auto"` en `ConIgCba/Web.config:29` (commit `e9746a91` del CRM). Medido contra producción el 24/09: **todos los errores vuelven en JSON con su status real**, y el token inválido ya no es un 302 sino un **401**.
+>
+> | Caso | HTTP real (24/09) | Cuerpo |
+> |---|---|---|
+> | Token inválido o ausente | **401** | `{"result":"error","message":"Token inválido.","data":null}` |
+> | Acción fuera de la lista blanca | **403** | `{"result":"error","message":"Acción no permitida para este cliente.",...}` |
+> | Parámetro inválido | **400** | `{"result":"error","message":"El parámetro 'id_comision' debe ser numérico.",...}` |
+> | Verbo distinto de POST | **405** | `{"result":"error","message":"Método no permitido",...}` |
+>
+> El cliente no se rompió porque rutea por status y nunca lee el cuerpo de un error. Lo único que falló fue el mapeo del 401, que caía en "status inesperado": corregido el 24/09. La tabla de abajo queda como **historia del 18/09**; las reglas del cliente siguen vigentes.
+
+Lo que devolvía la API **hasta el 21/09/2026**:
 
 | Caso | HTTP real | Content-Type real |
 |---|---|---|
@@ -164,7 +177,7 @@ Lo que realmente devuelve la API:
 
 > **Por qué nadie lo notó antes:** ningún consumidor ejercita el camino de error. Los consumidores internos de `/api` van con cookie de sesión y hacen `r.json()` asumiendo JSON siempre — si les llega HTML, el parseo revienta y la promesa se rechaza **en silencio**. El bot solo pide acciones de su lista, así que nunca ve un 401 ni un 403.
 >
-> **Esto no se va a arreglar.** El arreglo sería un `<location path="api">` con `existingResponse="PassThrough"`, pero toca el `Web.config` de producción y cambia el contrato para todos los consumidores. Decisión tomada: el MCP rutea por status code. De todos modos es lo correcto aun con la API arreglada.
+> ~~**Esto no se va a arreglar.**~~ **Se arregló el 21/09/2026**, con `existingResponse="Auto"` global (no hizo falta el `<location path="api">`). La decisión de rutear por status code se mantiene: fue lo que hizo que el cambio no rompiera el cliente.
 
 ### Traducción a MCP
 
@@ -172,7 +185,7 @@ Cada caso se elige por el **status code**, nunca por texto del mensaje:
 
 | HTTP real | Significado | Qué se le dice a la persona |
 |---|---|---|
-| 3xx | Token ausente, inválido o cliente inactivo | "No pude autenticarme contra Saberes. Avisale al equipo técnico" |
+| 401 (antes del 21/09: 3xx) | Token ausente, inválido o cliente inactivo | "No pude autenticarme contra Saberes. Avisale al equipo técnico" |
 | 403 | Lista blanca mal configurada | "Esta integración no tiene permiso para esta consulta" |
 | 400 | Bug del MCP Server | "El sistema respondió de una forma que no pude interpretar". Loguear como error crítico |
 | 405 | Bug del MCP Server | Ídem |
@@ -476,7 +489,7 @@ El ejemplo de **Salida** de arriba es el diseño original; el contrato real difi
 | Request | — | `{"action":"recuperar_comision_x_id","id_comision":2672}`, parámetro al nivel raíz. Acepta número o string numérico |
 | `data` cuando existe | — | **Objeto**, no array |
 | No existe | `200` + `data: null` | ✅ Confirmado: `result:"ok"`, `message:"Sin resultados."`, `data:null` |
-| Parámetro no numérico o ausente | `400` con mensaje JSON | `400` **con HTML** (IIS reemplaza el cuerpo, ver §3). El mensaje literal nunca llega; el `inputSchema` evita el caso |
+| Parámetro no numérico o ausente | `400` con mensaje JSON | `400` con mensaje JSON (`"El parámetro 'id_comision' debe ser numérico."`), medido el 24/09. El cliente no lee el cuerpo de los errores; el `inputSchema` evita el caso de todos modos |
 | Casing | `"presencial"`, `"abierta"`, `"terra"` | Todo en **MAYÚSCULAS**. Se normaliza igual que `listar_cursos`: curso en sentence case, organización y lugares como nombre propio, modalidad y estado en minúscula. `nombre` (código de comisión) queda tal cual |
 | Fechas | "formato local" | **`dd/mm/yyyy`**. `Charla_Informativa` puede traer **texto libre** ("Sin charla programada"): por R4 se omite |
 | `Duración_en_meses` | número | **String** (`"4"`) → entero |

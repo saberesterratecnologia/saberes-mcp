@@ -80,6 +80,19 @@ test("302 is an authentication failure and redirects are never followed", async 
   assert.equal(capture.init?.redirect, "manual");
 });
 
+test("401 is an authentication failure, as the API answers since 2026-09-21", async () => {
+  // Measured against production on 2026-09-24: an invalid or missing token now
+  // gets a JSON 401 instead of a 302 to the login page.
+  const client = clientWith(
+    fakeFetch(401, '{"result":"error","message":"Token inv\u00e1lido.","data":null}'),
+  );
+
+  const error = await failureOf(client);
+
+  assert.equal(error.kind, "authentication_failed");
+  assert.equal(error.status, 401);
+});
+
 test("the request carries the token header, the POST method and the action", async () => {
   const capture: Capture = {};
   const body = JSON.stringify({ result: "ok", message: "", data: [] });

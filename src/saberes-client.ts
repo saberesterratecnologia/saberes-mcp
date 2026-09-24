@@ -1,15 +1,16 @@
 /**
  * HTTP client for the Saberes CRM RPC API.
  *
- * The error contract of this API is broken in production: only HTTP 200 returns
- * JSON. Every error path returns HTML, because the site's IIS configuration uses
- * `existingResponse="Replace"`, which discards the JSON error body the handler
- * writes. The 401 mapping additionally makes forms authentication turn the
- * response into a 302 to the login page.
+ * The status code is the only signal this client trusts. Until 2026-09-21 the
+ * API returned JSON only on HTTP 200: IIS (`existingResponse="Replace"`)
+ * replaced every error body with HTML, and an invalid token became a 302 to the
+ * login page. The CRM switched to `existingResponse="Auto"` that day, and
+ * errors now arrive as JSON with their real status (401, 403, 400, 405).
  *
- * Therefore the status code is the only trustworthy signal, and redirects must
- * never be followed: following the 302 would yield HTTP 200 with the login page
- * HTML, which is indistinguishable from success at the transport level.
+ * The client still never reads an error body and never follows redirects:
+ * following a 302 would yield HTTP 200 with the login page HTML, which is
+ * indistinguishable from success at the transport level. Because it routes by
+ * status alone, the IIS change only broke the 401 mapping, fixed on 2026-09-24.
  */
 
 /** Wire shape returned by the API on the happy path. */
@@ -122,10 +123,13 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 
 /** Maps a status code to its error kind. Only 200 is a success. */
 function errorForStatus(status: number): SaberesApiError {
-  if (status >= 300 && status < 400) {
+  // Since 2026-09-21 the API answers a JSON 401 for an absent or invalid token.
+  // Before that, IIS turned it into a 302 to the login page; both still mean the
+  // same thing, and redirects are never followed either way.
+  if (status === 401 || (status >= 300 && status < 400)) {
     return new SaberesApiError(
       "authentication_failed",
-      "The API redirected to the login page, which means the token is absent, invalid, or the client is inactive.",
+      "The API rejected the credentials: the token is absent, invalid, or the client is inactive.",
       status,
     );
   }
