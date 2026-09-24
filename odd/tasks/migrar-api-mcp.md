@@ -35,7 +35,7 @@ sumar `buscar_comision`.
 - [x] **T3 — `detalle_comision` sobre `comision`** — `a539b87`.
 - [x] **T4 — `buscar_comision` sobre `buscar_comisiones`** — `a539b87` (tool nueva, paginada).
 - [x] **T5 — `listar_cursos` sobre `cursos_disponibles`** — `a539b87` (espera el campo `organizacion`).
-- [ ] **T6 — Borrar la capa accidental** y el cliente de `/api`; configuración nueva.
+- [x] **T6 — Borrar la capa accidental** — `b95eeec` y el cliente de `/api`; configuración nueva.
 - [ ] **T7 — e2e contra producción + Claude Desktop** apuntando al token nuevo.
 - [ ] **T8 — Quitarle al cliente 14 las 4 acciones de `/api`** (CRM; decisión de Max).
 
@@ -52,3 +52,4 @@ sumar `buscar_comision`.
   Uruguay (2691: cuota 690) y Paraguay (2694: inscripción 140000) no son pesos argentinos. El
   agente afirmaría precios falsos. Pedido al CRM: moneda según el país de la organización, o
   `null` si no se puede determinar. No se conecta a Claude Desktop hasta que esté corregido.
+- **2026-09-24** — T6 `b95eeec`: cliente de `/api` y helpers de `S/D`/fechas/números borrados; `moneda` puede ser `null` (el tool no afirma moneda y avisa). 73 tests. e2e stdio contra prod OK.
