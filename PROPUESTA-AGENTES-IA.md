@@ -24,7 +24,7 @@ Esta versión incorpora el diseño de **`DISENO-API-MCP.md`**, que define cómo 
 | T | **La identidad por persona reutiliza el login del CRM, y el MCP nunca ve una contraseña.** La persona se autentica en una página del propio CRM (`/mcp-autorizar`, sesión normal + consentimiento), que le entrega al MCP un **código de un solo uso** canjeado por **canal trasero**. El MCP corre la maquinaria OAuth 2.1 (servidor de autorización + recurso protegido) | **No hay IdP separado** (Logto/Keycloak) federado contra `USUARIOS`, **ni login propio del MCP**. El CRM sigue siendo el único que valida contraseñas |
 | U | **Corrección principal de esta versión:** la migración de contraseñas a hash con salt **sigue siendo necesaria como tema de seguridad del CRM**, pero **ya no es prerrequisito** de la identidad por persona de este proyecto | El razonamiento de la v2.1–v2.5 («prerrequisito duro») aplicaba a un **IdP federado que validara contra la tabla de contraseñas**. Ese ya no es el diseño: **nada fuera del CRM valida contraseñas**, así que el defecto no se propaga ni crece |
 | V | **Permisos por rol y auditoría por persona son requisito de la producción multiusuario**, no una fase opcional posterior | Regla del diseño: **no se habilita a más de una persona hasta que identidad, permisos y auditoría estén los tres** |
-| W | **El alcance del agente por rol es una tabla explícita del CRM (`MCP_ALCANCE_ROL`)**, no se deriva de los permisos del CRM | Evita que un **sysadmin quede sin límite** a través del agente. Acceso efectivo = tools del rol ∩ reglas de datos de la persona (aplicadas por el CRM en `/api-mcp` vía `X-Acting-Person`) |
+| W | **El alcance del agente por rol son privilegios propios (`MCP · …`) en la tabla `PRIVILEGIOS` del CRM**, asignados por rol en `ROLES_PRIVILEGIOS` con la pantalla existente. No se derivan de los permisos que la persona ya tiene en el CRM | Evita que un **sysadmin quede sin límite** a través del agente. Acceso efectivo = tools del rol ∩ reglas de datos de la persona (aplicadas por el CRM en `/api-mcp` vía `X-Acting-Person`) |
 | X | **Auditoría de toda llamada a tool**: quién, cuándo, qué tool, parámetros sanitizados, resultado, cantidad y latencia. Archivo local *append-only* primero, envío por lotes a una tabla `MCP_AUDITORIA` del CRM | El **dashboard lo consume el CRM**, al final. **Sin Grafana.** Límite honesto: el MCP ve **llamadas a tools, no conversaciones** |
 | Y | **El CRM arregló su contrato de errores el 21/09/2026** (`existingResponse="Auto"`, commit `e9746a91` del CRM): todos los errores de `/api` devuelven **JSON con su status real**, y un token inválido da **`401`**, no `302` | Cae el hallazgo H de la v2.4. El cliente del MCP se adaptó al `401` el 24/09/2026 |
 | Z | **Verificado el 24/09/2026:** los conectores remotos propios de Claude están disponibles en Free, Pro, Max, Team y Enterprise; en Team/Enterprise **solo los Owners los agregan y cada persona se autentica individualmente**. Claude soporta OAuth con DCR y con **CIMD**; Codex soporta Streamable HTTP con OAuth incluido CIMD | La spec vigente **2026-07-28 se aleja de DCR hacia CIMD**: este MCP acepta CIMD y **no ofrece DCR**. El SDK instalado (1.30.0) implementa el protocolo **2025-11-25**; hay **betas** para la 2026-07-28 |
@@ -797,7 +797,7 @@ Ver [Dónde vive el MCP Server: decisión con riesgo aceptado](#dónde-vive-el-m
 
 **Para el piloto de una persona no se modifica una sola línea de la aplicación existente.** Eso es configuración, no desarrollo.
 
-**Lo que sí requiere desarrollo en el CRM, a partir de la decisión del 24/09/2026:** el endpoint `/api-mcp`, la página `/mcp-autorizar`, las tablas `MCP_ALCANCE_ROL` y `MCP_AUDITORIA`, y la pantalla «mis conexiones». Nada de eso toca `/api` ni a sus consumidores actuales. El reparto exacto de qué construye cada lado está en `DISENO-API-MCP.md` §7.
+**Lo que sí requiere desarrollo en el CRM, a partir de la decisión del 24/09/2026:** el endpoint `/api-mcp`, la página `/mcp-autorizar`, los privilegios `MCP · …` (en la tabla `PRIVILEGIOS` que ya existe), la tabla `MCP_AUDITORIA`, y la pantalla «mis conexiones». Nada de eso toca `/api` ni a sus consumidores actuales. El reparto exacto de qué construye cada lado está en `DISENO-API-MCP.md` §7.
 
 ### En cada PC del equipo
 
@@ -864,14 +864,14 @@ Detalle completo en [3. Identidad por persona](#3-identidad-por-persona--reutili
 
 En Claude, los conectores remotos propios están disponibles en Free, Pro, Max, Team y Enterprise; en **Team y Enterprise solo los Owners los agregan, y cada persona se autentica individualmente** —justo el comportamiento que este diseño necesita.
 
-#### 2. Permisos por rol: el alcance del agente es una tabla, no una herencia
+#### 2. Permisos por rol: el alcance del agente son privilegios propios, no una herencia
 
 ```
-acceso efectivo = tools permitidas para el rol   (tabla MCP_ALCANCE_ROL, en el CRM)
+acceso efectivo = privilegios MCP del rol        (PRIVILEGIOS del CRM, «MCP · …»)
                 ∩ reglas de datos de la persona   (las del CRM, aplicadas en /api-mcp)
 ```
 
-**Por qué el alcance no se deriva de los permisos del CRM.** En el CRM, `esSysadmin` saltea `puede_leer` y ve todo. Quien más va a usar el agente (Dirección) suele ser sysadmin: si el alcance del agente copiara los permisos del CRM, **para esas personas no habría límite alguno**. Por eso el alcance vive en una tabla aparte y explícita por rol, `MCP_ALCANCE_ROL`, administrada donde se administran los roles. Un sysadmin tiene exactamente las tools que su rol tenga asignadas ahí, ni una más.
+**Por qué el alcance no se deriva de los permisos del CRM.** En el CRM, `esSysadmin` saltea `puede_leer` y ve todo. Quien más va a usar el agente (Dirección) suele ser sysadmin: si el alcance del agente copiara los permisos del CRM, **para esas personas no habría límite alguno**. Por eso el alcance son **privilegios nuevos y propios del agente** (`MCP · Listar cursos`, `MCP · Detalle de comisión`, …) en la tabla `PRIVILEGIOS` que el CRM ya tiene, asignados por rol con su pantalla existente. Un sysadmin tiene exactamente los privilegios `MCP · …` que su rol tenga asignados, ni uno más: verificado el 24/09/2026, `Evaluar_Privilegio` no tiene atajo para sysadmin. Detalle y reglas en `DISENO-API-MCP.md` §3.5.
 
 Reglas:
 
@@ -893,7 +893,7 @@ Traducción: **`ROLES_PRIVILEGIOS` es un insumo declarativo, no una garantía de
 
 **Cómo se conecta con lo anterior.** Ese enforcement desparejo es exactamente la razón por la que el diseño **no confía en una sola capa**:
 
-- el **alcance por rol** no se hereda de `ROLES_PRIVILEGIOS`: se declara explícitamente en `MCP_ALCANCE_ROL`;
+- el **alcance por rol** no se hereda de los privilegios existentes: son privilegios `MCP · …` propios, asignados explícitamente en `ROLES_PRIVILEGIOS`, solo para una lista blanca de roles;
 - el **MCP** chequea ese alcance en cada `tools/call`;
 - el **CRM re-chequea** en `/api-mcp` con `X-Acting-Person`, así que un bug de permisos del MCP **no alcanza para entregar datos** fuera de las reglas de esa persona.
 
@@ -1242,7 +1242,7 @@ Implementación: `github.com/saberesterratecnologia/saberes-mcp` (privado), Type
 
 **3. Permisos por rol**
 
-- [ ] Tabla `MCP_ALCANCE_ROL` + pantalla de administración en el CRM
+- [ ] Privilegios `MCP · …` en `PRIVILEGIOS` (script SQL versionado) y su asignación a roles con la pantalla existente
 - [ ] Acción `resolver_acceso` y `X-Acting-Person` obligatorio en `/api-mcp`
 - [ ] Filtrado de `tools/list` y chequeo en cada `tools/call`; re-chequeo del CRM como defensa en profundidad
 - [ ] Pantalla «mis conexiones» para revocar
@@ -1383,9 +1383,9 @@ Este proyecto no debe sumar un solo puerto a esa máquina.
 |---|---|---|---|
 | **Las personas no lo usan** | Media | Alto | Arrancar con un área motivada. Resultados rápidos. No forzar adopción. |
 | **Exposición de PII** | Media | Alto | Dos de las cinco tools iniciales devuelven datos personales. Decidir explícitamente qué área ve qué, y proyectar solo los campos necesarios. |
-| **Conector equivocado a la persona equivocada** | Media | Medio | El piloto es de **una sola persona**. Para más de una, el permiso deja de ser por conector y pasa a ser por persona y rol (identidad + `MCP_ALCANCE_ROL`): esa es la regla de corte del plan. |
-| **Enforcement de roles desparejo en el CRM** | Media | Medio | Tres capas, ninguna confiada en las otras: el alcance del agente **no se hereda** de `ROLES_PRIVILEGIOS` sino que se declara en `MCP_ALCANCE_ROL`; el MCP lo chequea en cada `tools/call`; y el **CRM re-chequea en `/api-mcp` con `X-Acting-Person`**, así que un bug de permisos del MCP no alcanza para entregar datos. |
-| **Sysadmin sin límite a través del agente** | Media | Alto | `esSysadmin` saltea `puede_leer` en el CRM, y Dirección suele ser sysadmin. El alcance del agente **no se deriva** de los permisos del CRM: es una tabla explícita por rol (`MCP_ALCANCE_ROL`). |
+| **Conector equivocado a la persona equivocada** | Media | Medio | El piloto es de **una sola persona**. Para más de una, el permiso deja de ser por conector y pasa a ser por persona y rol (identidad + privilegios `MCP · …`): esa es la regla de corte del plan. |
+| **Enforcement de roles desparejo en el CRM** | Media | Medio | Tres capas, ninguna confiada en las otras: el alcance del agente **no se hereda** de los privilegios existentes sino que son privilegios `MCP · …` propios, solo para roles de una lista blanca; el MCP lo chequea en cada `tools/call`; y el **CRM re-chequea en `/api-mcp` con `X-Acting-Person`**, así que un bug de permisos del MCP no alcanza para entregar datos. |
+| **Sysadmin sin límite a través del agente** | Media | Alto | `esSysadmin` saltea `puede_leer` en el CRM, y Dirección suele ser sysadmin. El alcance del agente **no se deriva** de los permisos del CRM: son privilegios `MCP · …` explícitos por rol, y `Evaluar_Privilegio` no tiene atajo para sysadmin (verificado). |
 | **Extracción masiva de datos vía el modelo** | Media | Medio | Solo lectura, `limit` máximo de 20, límite de llamadas por persona y por minuto, y `cantidad_resultados` auditado por llamada. |
 | **Inyección de prompts** | Media | Medio | Servidor propio y self-hosted. Permisos acotados por área. Fase 1 sin escritura. |
 | **El spec de MCP vuelve a cambiar** | **Alta** | Bajo | Ya pasó tres veces en 14 meses. Se usa el SDK oficial, que absorbe la mayor parte. Política de deprecación de 12 meses mínimo. |
@@ -1476,7 +1476,7 @@ Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en 
 ### Abiertas desde la v2.6 (diseño de identidad, permisos y auditoría)
 
 12. **¿Quién define la matriz rol → tools, y con qué contenido?**
-   - `MCP_ALCANCE_ROL` es una decisión de negocio, no técnica: dice qué puede hacer cada rol **a través del agente**, que no es lo mismo que lo que puede hacer en el CRM
+   - Qué privilegios `MCP · …` tiene cada rol es una decisión de negocio, no técnica: dice qué puede hacer cada rol **a través del agente**, que no es lo mismo que lo que puede hacer en el CRM
    - El borrador de `DISENO-API-MCP.md` §3.4 usa Secretaría Académica y Dirección como ejemplo. **La matriz real la tiene que validar Max**
 
 13. **Si una persona tiene varios roles, ¿unión o elección?**

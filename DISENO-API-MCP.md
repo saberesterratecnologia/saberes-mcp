@@ -1,9 +1,11 @@
 # Diseño — `/api-mcp`, identidad, permisos y auditoría
 
-**Versión:** 0.2 (borrador)
+**Versión:** 0.3 (borrador)
 **Fecha:** 24/09/2026
 **Estado:** contrastado con el CRM el 24/09/2026 (sesión green-cloud, `documentacion/api/contraste-diseno-api-mcp.md` en su worktree). Respuestas en §8.1; **decisiones abiertas de Max** en §8.2
 
+> **Cambios de la v0.3 (24/09/2026).** El alcance del agente por rol **reutiliza la tabla `PRIVILEGIOS` del CRM** en vez de una tabla nueva: privilegios sueltos `MCP · …` asignados en `ROLES_PRIVILEGIOS` con la pantalla de privilegios que ya existe. Verificado en el código: `Evaluar_Privilegio` no tiene atajo para sysadmin. Max decidió D1, D2 y D3 (§8.2).
+>
 > **Cambios de la v0.2 (24/09/2026).** El contraste con el CRM corrigió cuatro supuestos: `id_rol` es un catálogo compartido con los roles de comisión (1 = Estudiante), la vigencia se define por **estado** y no por fecha, no existen reglas de datos por organización ligadas a la persona, y `/mcp-autorizar` cae bajo un defecto de postbacks ya conocido del CRM. También sumó un requisito de baja (`resolver_acceso` debe revisar `activado` y `borrada`) y tres decisiones para Max.
 **Documento padre:** `PROPUESTA-AGENTES-IA.md` v2.6
 **Documento hermano:** `DISENO-TOOLS-MCP.md` v1.3 (contrato de cada tool hacia el modelo)
@@ -163,27 +165,29 @@ El registro de clientes sigue el orden de la spec 2026-07-28: preregistro, luego
 ### 3.1 El modelo
 
 ```
-acceso efectivo = tools permitidas para el rol  (alcance del agente, tabla del CRM)
+acceso efectivo = privilegios MCP del rol       (alcance del agente: PRIVILEGIOS del CRM)
                 ∩ reglas de datos de la persona  (las del CRM, aplicadas en /api-mcp)
 ```
 
 Dos capas, cada una en un solo lugar:
 
-- **Qué tools** puede usar un rol a través del agente: la decide la tabla de alcance. El MCP la aplica.
+- **Qué tools** puede usar un rol a través del agente: la deciden los **privilegios `MCP · …`** asignados a ese rol en `ROLES_PRIVILEGIOS` (§3.5). El MCP los aplica.
 - **Qué datos** puede ver la persona dentro de cada tool: los decide el CRM en `/api-mcp`, con `X-Acting-Person`. El MCP no reimplementa reglas de datos.
 
 ### 3.2 Sysadmin no es comodín
 
-En el CRM, `esSysadmin` saltea `puede_leer` y ve todo. Quien más va a usar el agente (Dirección) suele ser sysadmin. Si el alcance del agente copiara los permisos del CRM, **para ellos no habría límite**.
+En partes del CRM, `esSysadmin` saltea los controles: por ejemplo, `puede_leer` de memoria operativa y la rama "Sistema" del menú. Quien más va a usar el agente (Dirección) suele ser sysadmin. Si el alcance del agente se derivara de lo que la persona puede hacer en el CRM, **para ellos no habría límite**.
 
-Por eso el alcance del agente **no se deriva** de los permisos del CRM: es una tabla aparte, explícita por rol. Un sysadmin tiene exactamente las tools que su rol tenga asignadas en esa tabla, ni una más.
+Por eso el alcance del agente **no se deriva** de los permisos existentes del CRM: son **privilegios nuevos y propios del agente** (`MCP · …`), asignados explícitamente por rol. Tener el privilegio "Ingreso al sistema" o cualquier otro del backoffice no otorga nada en el agente. Un sysadmin tiene exactamente los privilegios `MCP · …` que el rol 4 tenga asignados, ni uno más.
+
+> ✅ **Verificado en el código del CRM (24/09/2026):** `Evaluar_Privilegio` (`Negocio/usuariosAccesoDatos.vb:1151`) es un join puro persona → `PERSONAS_ROLES` → `ROLES_PRIVILEGIOS`, **sin atajo para sysadmin**. Reutilizar `PRIVILEGIOS` no reintroduce el problema.
 
 ### 3.3 Reglas
 
-1. **Negado por defecto.** Una persona sin ningún rol mapeado en la tabla de alcance no ve ninguna tool.
+1. **Negado por defecto.** Una persona sin ningún privilegio `MCP · …` no ve ninguna tool.
 2. **Varios roles:** la persona recibe la **unión** de las tools de sus roles. Coincide con el CRM: `evaluar_acceso` mira cualquier rol de la persona, no el activo. *(Nota: el CRM tiene un `id_rol_usuario_actual` que hoy no usa para autorizar; si algún día lo empieza a usar, este punto queda desalineado.)*
 3. **El filtrado de `tools/list` no es seguridad**, es experiencia de uso. Cada `tools/call` se vuelve a chequear contra el acceso efectivo.
-4. **Defensa en profundidad:** el CRM vuelve a chequear en `/api-mcp` que la acción sea coherente con la persona (`X-Acting-Person`): que esté activa y que su rol tenga el permiso en `MCP_ALCANCE_ROL`. Si el MCP tuviera un bug de permisos, el CRM igual no ejecuta la acción.
+4. **Defensa en profundidad:** el CRM vuelve a chequear en `/api-mcp` que la acción sea coherente con la persona (`X-Acting-Person`): que esté activa y que tenga el privilegio `MCP · …` de esa acción. Si el MCP tuviera un bug de permisos, el CRM igual no ejecuta la acción.
    - **Límite, confirmado por el CRM:** **no existen reglas de datos por organización ligadas a la persona.** `PERSONAS_ROLES` no tiene organización; en el sitio la organización sale del dominio o de `?org=`. Sysadmin y secretaría ven todas las organizaciones. Así que el re-chequeo es de **acción**, no de **filas**. Si se quiere acotar a una persona a una organización, hay que modelarlo: es la decisión abierta D2 (§8.2).
 5. **Los permisos los decide el servidor, nunca el modelo.** Ningún parámetro de una tool puede ampliar el alcance.
 
@@ -197,27 +201,37 @@ Por eso el alcance del agente **no se deriva** de los permisos del CRM: es una t
 | `detalle_comision` con `incluir_aranceles` | ✅ | ✅ |
 | `estado_de_persona` | ✅ *(bloqueada hasta la decisión de dirección sobre PII)* | ❌ |
 
-`incluir_aranceles` se modela como un permiso propio (`detalle_comision.aranceles`), para poder negarlo a un rol sin quitarle la tool.
+`incluir_aranceles` se modela como un privilegio propio (`MCP · Aranceles de comisión`), para poder negarlo a un rol sin quitarle la tool. Además, por la decisión D1, **los montos que la comisión marca como "no mostrar" no salen nunca**, tenga o no el privilegio.
 
-### 3.5 Tabla de alcance en el CRM (propuesta)
+### 3.5 El alcance vive en `PRIVILEGIOS` (el mecanismo que el CRM ya tiene)
 
-```
-MCP_ALCANCE_ROL
-  id_rol          → rol de sistema del CRM (solo roles de la lista habilitada, ver abajo)
-  permiso         → 'listar_cursos' | 'buscar_comision' | 'detalle_comision'
-                    | 'detalle_comision.aranceles' | 'estado_de_persona'
-  activo          → bit
-  alta_por, alta_at, baja_por, baja_at   → quién lo otorgó o quitó y cuándo
-```
+El CRM ya modela permisos con dos tablas y tiene su pantalla de administración (`modulos/usuarios/privilegios/`):
 
-Cada cambio de esta tabla es, en sí mismo, un evento auditable del CRM.
+| Tabla | Columnas | Uso para el agente |
+|---|---|---|
+| `PRIVILEGIOS` | `id_privilegio` (IDENTITY), `nombre`, `activado`, `descripcion`, `MenuId`, `sinItemMenu` | Un privilegio **suelto** (`sinItemMenu = 1`, sin ítem de menú) por cada permiso del agente |
+| `ROLES_PRIVILEGIOS` | `id_rol`, `id_privilegio` | Qué roles tienen qué privilegio del agente |
 
-> 🔴 **`id_rol` no es solo "rol de área".** `ROLES` es un único catálogo que sirve a la vez para el rol de sistema (`PERSONAS_ROLES`) y para el rol dentro de una comisión (`COMISIONES_PERSONAS`): **1 = Estudiante, 2 = Profesor**, y los mismos números gobiernan `VISTAS_ROLES`. Una fila con `id_rol = 1` **le daría el permiso a todos los estudiantes**, el universo más grande del sistema.
->
-> **Reglas que esto impone:**
-> - Una **lista blanca de roles habilitados** para el agente (Secretaría, Dirección, …). Estudiante y Profesor quedan fuera por construcción: el ABM no los ofrece y `/api-mcp` los rechaza aunque alguien inserte la fila a mano.
-> - La pantalla de administración muestra el **nombre** del rol, nunca el número.
-> - `esSysAdmin` es el rol 4 (confirmado): §3.2 se sostiene.
+**Privilegios del agente** (se crean con un script SQL versionado, igual que `sql/2026-09-04_MO_002_menu_privilegios.sql`):
+
+| `nombre` | Permite |
+|---|---|
+| `MCP · Listar cursos` | `listar_cursos` |
+| `MCP · Buscar comisiones` | `buscar_comision` |
+| `MCP · Detalle de comisión` | `detalle_comision` |
+| `MCP · Aranceles de comisión` | `detalle_comision` con `incluir_aranceles` |
+| `MCP · Estado de persona` | `estado_de_persona` *(se crea cuando dirección apruebe la PII)* |
+
+**Por qué reutilizar y no crear una tabla nueva:** un solo sistema de permisos, administrado donde ya se administran los roles, con la pantalla que el equipo ya conoce. Es el principio de este diseño: dos sistemas de permisos siempre divergen.
+
+**Cuatro reglas que lo hacen seguro:**
+
+1. **Lista blanca de roles habilitados.** `ROLES` es un catálogo compartido con los roles de comisión (**1 = Estudiante, 2 = Profesor**). La pantalla de privilegios permitiría asignarle un privilegio `MCP · …` al rol Estudiante, y eso habilitaría el agente para todos los estudiantes. `resolver_acceso` **ignora cualquier privilegio `MCP · …` de un rol fuera de la lista blanca** (Secretaría, Dirección, …), aunque la fila exista.
+2. **Se resuelve por `nombre`, no por `id_privilegio`.** El id es IDENTITY y puede cambiar entre entornos; la propia documentación del CRM advierte que `evaluar_acceso(id)` solo sirve con ids fijos. `resolver_acceso` busca los privilegios cuyo `nombre` empieza con `MCP · `.
+3. **Se respeta `PRIVILEGIOS.activado`.** `Evaluar_Privilegio` **no lo mira** (verificado). `resolver_acceso` sí: desactivar `MCP · Detalle de comisión` apaga esa tool para todos al instante. Funciona como interruptor por tool.
+4. **No se usa `evaluar_acceso(1)`** ni ningún privilegio existente del backoffice como permiso del agente. El 1 es "Ingreso al sistema" y lo tienen estudiantes y profesores.
+
+> ⚠️ **Lo que se pierde frente a una tabla propia:** `ROLES_PRIVILEGIOS` **no registra quién otorgó o quitó un privilegio ni cuándo**. Para el piloto se acepta. Si dirección necesita esa traza, se agrega una tabla de historial o un trigger, sin cambiar el modelo.
 
 ---
 
@@ -266,7 +280,7 @@ Error:
 | Acción | Entrada | Salida |
 |---|---|---|
 | `canjear_codigo_autorizacion` | `codigo`, `state` | `{ id_persona, id_concesion }`. Marca el código como usado. `400` si venció, se usó o no coincide el `state` |
-| `resolver_acceso` | `id_persona` (vía `X-Acting-Person`) | `{ activa, roles: [...], permisos: [...], concesiones_revocadas: [...] }` |
+| `resolver_acceso` | `id_persona` (vía `X-Acting-Person`) | `{ activa, roles: [...], permisos: [...], concesiones_revocadas: [...] }`. `permisos` = privilegios `MCP · …` **activados**, de roles **de la lista blanca** (§3.5) |
 | `registrar_eventos_auditoria` | lote de eventos (§5) | `{ recibidos }` |
 
 **De datos** (con `X-Acting-Person`):
@@ -315,7 +329,7 @@ Error:
 }
 ```
 
-Con `es_virtual` explícito, `localidad: null` significa "no aplica" en una comisión virtual y "falta el dato" en una presencial: la ambigüedad del `"S/D"` desaparece. `aranceles` solo viene si se pide **y** si la persona tiene el permiso `detalle_comision.aranceles`.
+Con `es_virtual` explícito, `localidad: null` significa "no aplica" en una comisión virtual y "falta el dato" en una presencial: la ambigüedad del `"S/D"` desaparece. `aranceles` solo viene si se pide, si la persona tiene el privilegio `MCP · Aranceles de comisión` **y** solo con los montos que la comisión marca para mostrar (D1).
 
 **Tipos en la base** (confirmado por el CRM): los montos son `Money`, `duracion_meses` es `Int`, las fechas son `Date`. Todo el formateo (`"$ 29.000 (*...)"`, `"S/D"`, `UPPER`) lo arma el SP de Prometheo: `/api-mcp` **no convierte nada, solo deja de formatear**. `nota_promocion` sale de `motivo_bonificacion_*` (`NVarChar(200)`), texto cargado en el backoffice.
 
@@ -407,7 +421,7 @@ Si `/mcp-autorizar` siguiera el patrón mayoritario, **una persona autenticada p
 | Página `/mcp-autorizar`: sesión del CRM + consentimiento + código de un uso | Metadatos RFC 9728 y 401 con `WWW-Authenticate` en `/mcp` |
 | Tabla de códigos de un uso y de concesiones | Almacén de tokens (hashes) |
 | **`/mcp-autorizar` con el re-chequeo dentro del handler** (§6.1) | |
-| Tabla `MCP_ALCANCE_ROL` + su pantalla de administración | Resolución de acceso efectivo, filtrado de `tools/list`, chequeo en cada `tools/call` |
+| Script SQL versionado con los privilegios `MCP · …` (sueltos) y su asignación inicial a roles, usando la pantalla de privilegios existente | Resolución de acceso efectivo, filtrado de `tools/list`, chequeo en cada `tools/call` |
 | Pantalla "mis conexiones" (revocar) | Envío de `X-Acting-Person` a `/api-mcp` |
 | Tabla `MCP_AUDITORIA` | Archivo de auditoría local + envío por lotes |
 | Marca en `SERVICIOS_API` para clientes que pueden actuar en nombre de personas | Transporte Streamable HTTP (hoy es stdio) |
@@ -417,7 +431,7 @@ Si `/mcp-autorizar` siguiera el patrón mayoritario, **una persona autenticada p
 
 1. `/api-mcp` con `cursos_disponibles`, `comision` y `buscar_comisiones`, todavía con el token de servicio y sin `X-Acting-Person`. Las tools migran y la capa accidental del MCP desaparece.
 2. Identidad: `/mcp-autorizar`, `canjear_codigo_autorizacion`, OAuth del MCP, transporte HTTPS. Un piloto con una persona.
-3. Permisos: `MCP_ALCANCE_ROL`, `resolver_acceso`, `X-Acting-Person` obligatorio.
+3. Permisos: privilegios `MCP · …` en `PRIVILEGIOS`, `resolver_acceso`, `X-Acting-Person` obligatorio.
 4. Auditoría: archivo local, `registrar_eventos_auditoria`, `MCP_AUDITORIA`.
 5. Dashboard en el CRM.
 
@@ -454,11 +468,13 @@ Respondido por la sesión green-cloud, solo lectura, a partir del código del CR
 
 ### 8.2 Decisiones abiertas de Max
 
-| # | Decisión | Opciones | Recomendación |
+Decididas por Max el 24/09/2026, siguiendo la recomendación en los tres casos.
+
+| # | Decisión | Opciones | **Decidido** |
 |---|---|---|---|
-| **D1** | **Flags de publicación de montos.** ¿El permiso `detalle_comision.aranceles` alcanza para ver un monto que el negocio marcó como "no mostrar"? | (a) El permiso alcanza: el agente es una herramienta interna. (b) Se respetan siempre los `mostrar_valor_*` | **(b)**. Si el negocio decidió no mostrar un valor, el agente no debería contradecirlo sin que nadie lo haya decidido explícitamente. Se puede revisar después |
-| **D2** | **Alcance por organización.** Hoy nadie del staff está acotado a una organización | (a) Sin acotar, como hoy en el CRM. (b) Modelar organización por persona o rol | **(a) para el piloto**, porque replica lo que el CRM ya permite. (b) solo si aparece un caso real |
-| **D3** | **Unificar "comisión disponible"** en el CRM (4 predicados) | (a) Ahora, dentro del paso 1 (4-5 sesiones). (b) Aparte, después | **(b)**. `/api-mcp` usa la regla del catálogo y no queda bloqueado |
+| **D1** | **Flags de publicación de montos.** ¿El privilegio de aranceles alcanza para ver un monto que el negocio marcó como "no mostrar"? | (a) El permiso alcanza: el agente es una herramienta interna. (b) Se respetan siempre los `mostrar_valor_*` | ✅ **(b)**: se respetan los `mostrar_valor_*` de cada comisión. Si el negocio decidió no mostrar un valor, el agente tampoco |
+| **D2** | **Alcance por organización.** Hoy nadie del staff está acotado a una organización | (a) Sin acotar, como hoy en el CRM. (b) Modelar organización por persona o rol | ✅ **(a)**: sin acotar, como hoy en el CRM. (b) solo si aparece un caso real |
+| **D3** | **Unificar "comisión disponible"** en el CRM (4 predicados) | (a) Ahora, dentro del paso 1 (4-5 sesiones). (b) Aparte, después | ✅ **(b)**: aparte, después. `/api-mcp` usa la regla del catálogo |
 
 ---
 
