@@ -28,7 +28,7 @@ rol → tools y el registro de auditoría. Roles de ejemplo: Secretaría Académ
   permisos, formato de auditoría, riesgos y preguntas para el CRM.
 - [x] **T4 — Propuesta v2.6** — `cc07121`: la identidad por persona deja de estar bloqueada por la migración
   de contraseñas; producción remota con HTTPS + OAuth; referencia al documento nuevo.
-- [ ] **T5 — Pasarle el diseño a green-cloud** para contrastarlo con el CRM.
+- [x] **T5 — Pasarle el diseño a green-cloud** (enviado 24/09; respuesta pendiente) para contrastarlo con el CRM.
 
 ## Bitácora
 
@@ -39,3 +39,4 @@ rol → tools y el registro de auditoría. Roles de ejemplo: Secretaría Académ
   el SDK instalado 1.30.0 implementa 2025-11-25 y hay betas para 2026-07-28. T3 `b0a71c2`.
   T4 delegado a gentle-ai-worker, verificado por lectura. Pendiente para green-cloud: el
   nombre real de la tabla (`SERVICIO_API` vs `SERVICIOS_API`, los documentos usan los dos).
+- **2026-09-24** — T3+T4 revisión nativa `review-58c409643fb1646c` (solo docs, riesgo bajo) aprobada. T5: diseño enviado a green-cloud (01a0d470) por intercom: preguntas §8, choques con el CRM, nombre real de la tabla de clientes, estimación de los pasos 1 y 2.
