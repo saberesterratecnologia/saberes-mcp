@@ -37,7 +37,7 @@ sumar `buscar_comision`.
 - [x] **T5 — `listar_cursos` sobre `cursos_disponibles`** — `a539b87` (espera el campo `organizacion`).
 - [x] **T6 — Borrar la capa accidental** — `b95eeec` y el cliente de `/api`; configuración nueva.
 - [x] **T7 — e2e contra producción + Claude Desktop** — validado por Max 24/09 apuntando al token nuevo.
-- [ ] **T8 — Quitarle al cliente 14 las 4 acciones de `/api`** (CRM; decisión de Max).
+- [x] **T8 — Quitarle al cliente 14 las 4 acciones de `/api`** — cliente eliminado por decisión de Max (CRM; decisión de Max).
 
 ## Bitácora
 
@@ -73,3 +73,10 @@ sumar `buscar_comision`.
   hay?" → las tres organizaciones con sus ids; "¿Cuánto sale la de Uruguay?" → comisión 2691 en
   **pesos uruguayos**, sin inventar la inscripción regular (oculta por D1) y aclarando que los
   datos no dicen la cantidad de cuotas ni si el pago único incluye la inscripción.
+- **2026-09-24** — T8: por decisión de Max el cliente 14 `mcp-secretaria-academica` se **eliminó**
+  de `SERVICIOS_API` (CRM `main` = `100a41f0`, deploy solo SQL, registro
+  `documentacion/deploy/historial/20260924-1845.md`). green-cloud verificó antes cero FKs, cero
+  columnas `*servicio_api*`, cero SP/vistas/triggers y cero código que lo referencie. Rollback
+  repone la fila con id 14 y sin token. Post-check mío: token viejo → 401 en `/api` y `/api-mcp`;
+  cliente 15 → 200. `/api` no perdió nada: las cuatro lecturas siguen otorgadas a `prometheo_bot`.
+  **Feature cerrada.**
