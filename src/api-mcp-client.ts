@@ -299,6 +299,10 @@ function readErrorCode(text: string): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
+function isAbort(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === "AbortError";
+}
+
 export class ApiMcpClient {
   readonly #baseUrl: string;
   readonly #token: string;
@@ -323,9 +327,13 @@ export class ApiMcpClient {
     params: Record<string, unknown> = {},
   ): Promise<unknown> {
     const controller = new AbortController();
+    // The timeout covers the whole exchange, body included. Clearing it when
+    // the headers arrive would let a server that stalls mid-body hang the
+    // tool forever, with no timeout ever reported.
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
 
     let response: Response;
+    let text: string;
     try {
       response = await this.#fetch(this.#baseUrl, {
         method: "POST",
@@ -338,8 +346,24 @@ export class ApiMcpClient {
         redirect: "manual",
         signal: controller.signal,
       });
+
+      try {
+        text = await response.text();
+      } catch (cause) {
+        if (isAbort(cause)) throw cause;
+        // An unreadable error body only loses the diagnostic code: the status
+        // alone decides the kind. An unreadable 200 is a transport failure.
+        if (response.status === 200) {
+          throw new ApiMcpError(
+            "network_error",
+            "The API response body could not be read.",
+          );
+        }
+        text = "";
+      }
     } catch (cause) {
-      if (cause instanceof Error && cause.name === "AbortError") {
+      if (cause instanceof ApiMcpError) throw cause;
+      if (isAbort(cause)) {
         throw new ApiMcpError(
           "timeout",
           `The API did not answer within ${this.#timeoutMs} ms.`,
@@ -349,8 +373,6 @@ export class ApiMcpClient {
     } finally {
       clearTimeout(timer);
     }
-
-    const text = await response.text().catch(() => "");
 
     if (response.status !== 200) {
       throw errorForStatus(response.status, readErrorCode(text));

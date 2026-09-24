@@ -461,6 +461,43 @@ test("a request that exceeds the timeout fails as a timeout", async () => {
   assert.equal(error.status, undefined);
 });
 
+// Headers arrived, body never finishes; like fetch, the read rejects on abort.
+function stallingBodyFetch(status: number): typeof fetch {
+  return ((_input: unknown, init?: RequestInit) =>
+    Promise.resolve({
+      status,
+      text: () =>
+        new Promise<string>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const abortError = new Error("aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
+        }),
+    })) as unknown as typeof fetch;
+}
+
+test("a body that stalls after the headers still fails as a timeout", async () => {
+  for (const status of [200, 500]) {
+    const error = await failureOf(() =>
+      clientWith(stallingBodyFetch(status), 20).listCourses(),
+    );
+    assert.equal(error.kind, "timeout", `status ${status}`);
+  }
+});
+
+test("a 200 whose body cannot be read is a network error, not invalid JSON", async () => {
+  const brokenBodyFetch = (() =>
+    Promise.resolve({
+      status: 200,
+      text: () => Promise.reject(new TypeError("terminated")),
+    })) as unknown as typeof fetch;
+
+  const error = await failureOf(() => clientWith(brokenBodyFetch).listCourses());
+
+  assert.equal(error.kind, "network_error");
+});
+
 test("an unreachable endpoint fails as a network error", async () => {
   const brokenFetch = (async () => {
     throw new TypeError("fetch failed");
