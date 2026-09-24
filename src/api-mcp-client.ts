@@ -51,10 +51,16 @@ const courseSchema = z.object({
  * The fees of a commission.
  *
  * Every amount is optional because the business hides amounts per commission:
- * a hidden fee is *absent*, not null. Only the currency is always there.
+ * a hidden fee is *absent*, not null.
+ *
+ * The currency is always present as a key, but its value may be `null`: the
+ * CRM answers the ISO 4217 code when it can determine one and `null` when it
+ * cannot. It used to answer `"ARS"` for every commission, which was false for
+ * the Uruguayan and Paraguayan organizations, so an honest `null` is data the
+ * tools must relay, not a contract that moved. A *missing* key still is one.
  */
 const feesSchema = z.object({
-  moneda: z.string(),
+  moneda: z.string().nullable(),
   inscripcion_regular: z.number().optional(),
   inscripcion_promocionada: z.number().optional(),
   cuota_regular: z.number().optional(),

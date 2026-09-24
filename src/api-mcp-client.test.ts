@@ -212,6 +212,59 @@ test("one commission arrives with its fees, dates and numbers as data", async ()
   assert.equal(commission?.aranceles?.certificacion, undefined);
 });
 
+test("a currency the CRM could not determine is null, not a changed contract", async () => {
+  // The CRM used to answer "ARS" for every commission, which is false for the
+  // Uruguayan and Paraguayan organizations. It now sends the real ISO 4217
+  // code, or null when it cannot determine one: an unknown currency is data,
+  // not a contract that moved.
+  const payload = {
+    data: {
+      ...COMMISSION_2672,
+      aranceles: { ...COMMISSION_2672.aranceles, moneda: null },
+    },
+  };
+
+  const commission = await clientWith(jsonFetch(200, payload)).getCommission(
+    2672,
+    true,
+  );
+
+  assert.equal(commission?.aranceles?.moneda, null);
+  assert.equal(commission?.aranceles?.pago_unico, 159000);
+});
+
+test("a foreign currency travels through untouched", async () => {
+  const payload = {
+    data: {
+      ...COMMISSION_2672,
+      aranceles: { ...COMMISSION_2672.aranceles, moneda: "UYU" },
+    },
+  };
+
+  const commission = await clientWith(jsonFetch(200, payload)).getCommission(
+    2672,
+    true,
+  );
+
+  assert.equal(commission?.aranceles?.moneda, "UYU");
+});
+
+test("fees without the currency key are still a changed contract", async () => {
+  // Null means "unknown", which the tools have to say out loud. A missing key
+  // means the shape moved, and guessing it as unknown would hide that.
+  const { moneda: _moneda, ...feesWithoutCurrency } = COMMISSION_2672.aranceles;
+  const payload = {
+    data: { ...COMMISSION_2672, aranceles: feesWithoutCurrency },
+  };
+
+  const error = await failureOf(() =>
+    clientWith(jsonFetch(200, payload)).getCommission(2672, true),
+  );
+
+  assert.equal(error.kind, "contract_changed");
+  assert.match(error.message, /moneda/);
+});
+
 test("a commission without fees is a valid answer, not a broken contract", async () => {
   const { aranceles: _aranceles, ...withoutFees } = COMMISSION_2672;
 

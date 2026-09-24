@@ -14,9 +14,16 @@ export type CommissionReader = Pick<ApiMcpClient, "getCommission">;
  * publish by omitting the key, so there is nothing to parse here: only the
  * amounts that came through are projected, with their currency and the note
  * that qualifies the promotional ones.
+ *
+ * Exactly one of `moneda` and `aviso_moneda` is present. The agent serves four
+ * organizations across three countries, so an amount without its currency is
+ * not a number it can state: when the CRM does not know the currency, the
+ * warning takes the currency's place and says so in words the model cannot
+ * mistake for a value.
  */
 export interface CommissionFees {
-  moneda: string;
+  moneda?: string;
+  aviso_moneda?: string;
   inscripcion_regular?: number;
   inscripcion_promocionada?: number;
   cuota_regular?: number;
@@ -120,11 +127,23 @@ function toTalk(talk: Commission["charla_informativa"]): string | undefined {
   return time === undefined ? date : `${date} ${toShortTime(time)}`;
 }
 
-/** Projects the fees, keeping only the amounts the CRM actually published. */
+/** What the agent must not turn into a currency of its own choosing. */
+const UNKNOWN_CURRENCY_WARNING =
+  "La moneda de estos montos no está informada: no la supongas.";
+
+/**
+ * Projects the fees, keeping only the amounts the CRM actually published.
+ *
+ * The currency slot comes first either way, so the agent reads what the
+ * amounts are denominated in — or that nobody knows — before reading any
+ * amount at all.
+ */
 function toFees(fees: Fees | undefined): CommissionFees | undefined {
   if (fees === undefined) return undefined;
   return {
-    moneda: fees.moneda,
+    ...(fees.moneda === null
+      ? { aviso_moneda: UNKNOWN_CURRENCY_WARNING }
+      : { moneda: fees.moneda }),
     ...present("inscripcion_regular", fees.inscripcion_regular),
     ...present("inscripcion_promocionada", fees.inscripcion_promocionada),
     ...present("cuota_regular", fees.cuota_regular),

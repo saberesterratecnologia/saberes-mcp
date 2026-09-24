@@ -257,6 +257,48 @@ test("fees are opt-in, and a hidden amount stays absent", () => {
   assert.ok(!("certificacion" in (detail.aranceles ?? {})));
 });
 
+test("an unknown currency is never guessed: the amounts carry a warning instead", () => {
+  // The CRM answers null when it cannot determine the currency. Keeping a
+  // `moneda` key would force the agent to invent one, and four organizations
+  // across three countries do not share a currency.
+  const detail = toCommissionDetail(
+    {
+      ...COMMISSION,
+      aranceles: { ...COMMISSION.aranceles!, moneda: null },
+    },
+    true,
+  );
+  const fees = (detail.aranceles ?? {}) as Record<string, unknown>;
+
+  assert.ok(!("moneda" in fees));
+  assert.equal(
+    fees["aviso_moneda"],
+    "La moneda de estos montos no está informada: no la supongas.",
+  );
+  // The amounts are still the amounts: only their unit is unknown.
+  assert.equal(fees["inscripcion_regular"], 58000);
+  assert.equal(fees["pago_unico"], 159000);
+  assert.equal(fees["cuota_con_recargo"], 55000);
+  assert.equal(
+    fees["nota_promocion"],
+    "*Valor de la cuota con descuento abonando del 1 al 10 de cada mes",
+  );
+});
+
+test("a currency the CRM does know is relayed, with no warning", () => {
+  const detail = toCommissionDetail(
+    {
+      ...COMMISSION,
+      aranceles: { ...COMMISSION.aranceles!, moneda: "UYU" },
+    },
+    true,
+  );
+  const fees = (detail.aranceles ?? {}) as Record<string, unknown>;
+
+  assert.equal(fees["moneda"], "UYU");
+  assert.ok(!("aviso_moneda" in fees));
+});
+
 test("a commission whose fees were not sent has no fee block", () => {
   const { aranceles: _aranceles, ...withoutFees } = COMMISSION;
 

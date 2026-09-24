@@ -2,7 +2,7 @@
 
 A Model Context Protocol (MCP) server that exposes the Saberes CRM to a conversational agent (Claude Desktop, Codex, ChatGPT) for the Academic Secretariat.
 
-It is a translation layer, not a proxy: each tool is designed around a task, projects only the fields the task needs, and turns CRM data and failures into answers a model can use safely.
+It is a translation layer, not a proxy: each tool is designed around a task, projects only the fields the task needs, and turns CRM data and failures into answers a model can use safely. It covers the four organizations of the group, which share the CRM but not their courses, their venues or their currency.
 
 ## Status
 
@@ -11,10 +11,10 @@ It is a translation layer, not a proxy: each tool is designed around a task, pro
 | Transport | stdio (single-person pilot). Remote HTTPS with OAuth is designed, not built |
 | `listar_cursos` | ✅ Lists the courses on offer, grouped by organization |
 | `detalle_comision` | ✅ Details of one commission; fees only on request |
-| `buscar_comision` | Designed, waiting for the `/api-mcp` endpoint |
+| `buscar_comision` | ✅ Searches commissions by text, course, modality and state |
 | `estado_de_persona` | Blocked until management decides on student PII |
 
-The server currently talks to the CRM's shared `/api` endpoint. It will move to a dedicated `/api-mcp` endpoint (see `DISENO-API-MCP.md`), which removes most of the translation that only compensates for `/api`'s contract.
+Every tool talks to `/api-mcp`, the CRM endpoint built for this server (see `DISENO-API-MCP.md`). It answers data instead of CRM presentation — `null` instead of the `"S/D"` sentinel, ISO dates, numbers as numbers — so the translation that only compensated for the shared `/api` contract is gone.
 
 ## Prerequisites
 
@@ -41,8 +41,8 @@ Provide these variables through the environment at run time:
 
 | Variable | Description |
 | --- | --- |
-| `SABERES_API_URL` | The RPC endpoint. Defaults to `https://saberes.com.ar/api`. |
-| `SABERES_API_TOKEN` | The API token sent in the `X-Api-Token` header. Required: the server refuses to start without it. |
+| `SABERES_API_URL` | The RPC endpoint. Defaults to `https://saberes.com.ar/api-mcp`. |
+| `SABERES_API_TOKEN` | The token of the dedicated `/api-mcp` client, sent in the `X-Api-Token` header. Required: the server refuses to start without it. |
 
 The real token lives outside the repository, is never committed (`*.token` and `.env` are ignored), and is supplied through the environment at run time. Diagnostics go to stderr; stdout is the MCP protocol channel.
 
@@ -63,8 +63,8 @@ npm run typecheck
 
 | Path | Purpose |
 | --- | --- |
-| `src/saberes-client.ts` | HTTP client for the CRM. Routes by status code only, never follows redirects, never leaks the token |
-| `src/translation.ts` | Shared translation rules: casing, `"S/D"` sentinel, dates, integers, failure messages |
+| `src/api-mcp-client.ts` | HTTP client for `/api-mcp`. Routes by status code before parsing anything, never follows redirects, never leaks the token, and validates every 200 payload at run time with zod (`contract_changed` when the CRM moves the contract) |
+| `src/translation.ts` | Shared presentation rules: display-name normalization and failure sentences |
 | `src/tools/` | One file per tool, with its tests |
 | `src/index.ts` | Wiring and stdio transport |
 
