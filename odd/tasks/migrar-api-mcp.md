@@ -53,3 +53,14 @@ sumar `buscar_comision`.
   agente afirmaría precios falsos. Pedido al CRM: moneda según el país de la organización, o
   `null` si no se puede determinar. No se conecta a Claude Desktop hasta que esté corregido.
 - **2026-09-24** — T6 `b95eeec`: cliente de `/api` y helpers de `S/D`/fechas/números borrados; `moneda` puede ser `null` (el tool no afirma moneda y avisa). 73 tests. e2e stdio contra prod OK.
+- **2026-09-24** — Revisión `review-2af87f1dc4c9fd07` del tramo T2–T6: pidió **una corrección**
+  (`R3-timeout-body`, CRITICAL: el timeout se cancelaba antes de leer el cuerpo y un servidor
+  trabado colgaba la tool para siempre). Corregido en `3c36e59` (65 líneas, plan 70), validación
+  dirigida aprobada, acknowledged. Dos advertencias no bloqueantes: paginación de cursos (resuelta
+  en `3d1511c`) y `R3-search-state-filter` (`buscar_comision` no filtra por estado: decisión de Max).
+- **2026-09-24** — Bloqueo de moneda resuelto por el CRM (deploy `9a037c1e`): país por sede,
+  `moneda` null (el CRM no guarda ISO 4217), `moneda_nombre`/`moneda_simbolo`. `3d1511c`: la tool
+  muestra `pais` y `moneda_nombre`. e2e prod: Paraguay guaraníes, Uruguay pesos uruguayos,
+  Argentina pesos. 86 tests. **T7 desbloqueada.**
+- **2026-09-24** — Hallazgo del CRM fuera de alcance: `/api` (SP de Prometheo) formatea los montos
+  de las 14 comisiones de Uruguay y Paraguay con "$", como si fueran pesos. Afecta al bot hoy.
