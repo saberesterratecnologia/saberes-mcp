@@ -22,7 +22,7 @@ Este documento define cómo el MCP Server sabe **quién** lo usa, **qué** puede
 3. **Permisos por rol y auditoría por persona son requisito**, no una fase opcional.
 4. **El dashboard lo consume el CRM**, al final. No se usa Grafana.
 
-Roles de ejemplo en este borrador: **Secretaría Académica** y **Dirección**. La matriz real la define Max.
+Roles habilitados (decisión de Max, 24/09/2026): **3 — Secretaría académica** (área piloto) y **4 — Administrador del sistema**. Matriz en §3.4.
 
 ---
 
@@ -191,15 +191,21 @@ Por eso el alcance del agente **no se deriva** de los permisos existentes del CR
    - **Límite, confirmado por el CRM:** **no existen reglas de datos por organización ligadas a la persona.** `PERSONAS_ROLES` no tiene organización; en el sitio la organización sale del dominio o de `?org=`. Sysadmin y secretaría ven todas las organizaciones. Así que el re-chequeo es de **acción**, no de **filas**. Si se quiere acotar a una persona a una organización, hay que modelarlo: es la decisión abierta D2 (§8.2).
 5. **Los permisos los decide el servidor, nunca el modelo.** Ningún parámetro de una tool puede ampliar el alcance.
 
-### 3.4 Matriz de ejemplo (a validar por Max)
+### 3.4 Matriz de permisos (decidida por Max, 24/09/2026)
 
-| Tool | Secretaría Académica | Dirección |
-|---|---|---|
-| `listar_cursos` | ✅ | ✅ |
-| `buscar_comision` | ✅ | ✅ |
-| `detalle_comision` | ✅ | ✅ |
-| `detalle_comision` con `incluir_aranceles` | ✅ | ✅ |
-| `estado_de_persona` | ✅ *(bloqueada hasta la decisión de dirección sobre PII)* | ❌ |
+**Roles habilitados para el agente (lista blanca):** **3 — Secretaría académica** y **4 — Administrador del sistema**. Ningún otro rol, aunque tenga filas en `ROLES_PRIVILEGIOS`.
+
+| Privilegio | Tool | 3 — Secretaría académica | 4 — Administrador del sistema |
+|---|---|---|---|
+| `MCP · Listar cursos` | `listar_cursos` | ✅ | ✅ |
+| `MCP · Buscar comisiones` | `buscar_comision` | ✅ | ✅ |
+| `MCP · Detalle de comisión` | `detalle_comision` | ✅ | ✅ |
+| `MCP · Aranceles de comisión` | `detalle_comision` con `incluir_aranceles` | ✅ | ✅ |
+| `MCP · Estado de persona` | `estado_de_persona` | ⏸️ No se crea hasta la decisión de dirección sobre PII | ⏸️ Ídem |
+
+**El sysadmin tiene todo porque se le asignó explícitamente**, no por ser sysadmin: `Evaluar_Privilegio` no tiene atajo (§3.2). Si mañana se le quita un privilegio `MCP · …` al rol 4, el sysadmin lo pierde como cualquier otro.
+
+**Secretaría académica es el área piloto.** Los nombres de rol salen de la tabla `ROLES` del CRM (`documentacion/convenciones/menu-y-control-de-acceso.md`); en el ejemplo de la v0.1 figuraba "Dirección", que no es un rol del sistema.
 
 `incluir_aranceles` se modela como un privilegio propio (`MCP · Aranceles de comisión`), para poder negarlo a un rol sin quitarle la tool. Además, por la decisión D1, **los montos que la comisión marca como "no mostrar" no salen nunca**, tenga o no el privilegio.
 
@@ -226,7 +232,7 @@ El CRM ya modela permisos con dos tablas y tiene su pantalla de administración 
 
 **Cuatro reglas que lo hacen seguro:**
 
-1. **Lista blanca de roles habilitados.** `ROLES` es un catálogo compartido con los roles de comisión (**1 = Estudiante, 2 = Profesor**). La pantalla de privilegios permitiría asignarle un privilegio `MCP · …` al rol Estudiante, y eso habilitaría el agente para todos los estudiantes. `resolver_acceso` **ignora cualquier privilegio `MCP · …` de un rol fuera de la lista blanca** (Secretaría, Dirección, …), aunque la fila exista.
+1. **Lista blanca de roles habilitados.** `ROLES` es un catálogo compartido con los roles de comisión (**1 = Estudiante, 2 = Profesor**). La pantalla de privilegios permitiría asignarle un privilegio `MCP · …` al rol Estudiante, y eso habilitaría el agente para todos los estudiantes. `resolver_acceso` **ignora cualquier privilegio `MCP · …` de un rol fuera de la lista blanca** (hoy: 3 Secretaría académica y 4 Administrador del sistema), aunque la fila exista. Hoy la lista blanca es **{3, 4}** (§3.4).
 2. **Se resuelve por `nombre`, no por `id_privilegio`.** El id es IDENTITY y puede cambiar entre entornos; la propia documentación del CRM advierte que `evaluar_acceso(id)` solo sirve con ids fijos. `resolver_acceso` busca los privilegios cuyo `nombre` empieza con `MCP · `.
 3. **Se respeta `PRIVILEGIOS.activado`.** `Evaluar_Privilegio` **no lo mira** (verificado). `resolver_acceso` sí: desactivar `MCP · Detalle de comisión` apaga esa tool para todos al instante. Funciona como interruptor por tool.
 4. **No se usa `evaluar_acceso(1)`** ni ningún privilegio existente del backoffice como permiso del agente. El 1 es "Ingreso al sistema" y lo tienen estudiantes y profesores.
