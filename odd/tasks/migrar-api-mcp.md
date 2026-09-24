@@ -31,7 +31,7 @@ sumar `buscar_comision`.
 
 - [x] **T1 — Documentar** — `dab38e1` el alcance de cuatro organizaciones y el contrato medido de
   `/api-mcp` en `DISENO-API-MCP.md`.
-- [ ] **T2 — Cliente de `/api-mcp`** con su contrato de errores, tests con fetch inyectado.
+- [x] **T2 — Cliente de `/api-mcp`** — `c2c3ea7` con su contrato de errores, tests con fetch inyectado.
 - [ ] **T3 — `detalle_comision` sobre `comision`**.
 - [ ] **T4 — `buscar_comision` sobre `buscar_comisiones`** (tool nueva, paginada).
 - [ ] **T5 — `listar_cursos` sobre `cursos_disponibles`** (espera el campo `organizacion`).
@@ -43,3 +43,4 @@ sumar `buscar_comision`.
 
 - **2026-09-24** — `/api-mcp` en producción. e2e completo desde curl con el token del cliente
   15. Max decidió no rotar la clave de WhatsApp que quedó en el log local de green-cloud.
+- **2026-09-24** — T2 `c2c3ea7`: cliente con validación zod (`contract_changed`), 69 tests. Probado contra prod: 28 cursos **ya con `organizacion`** (green-cloud lo deployó), 404 → null, paginación por cursor, token falso → 401.
