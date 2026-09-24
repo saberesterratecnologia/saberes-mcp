@@ -21,12 +21,12 @@ rol → tools y el registro de auditoría. Roles de ejemplo: Secretaría Académ
 
 - [x] **T1 — 401 → `authentication_failed`** — `aeb4d2a` + corregir `DISENO-TOOLS-MCP.md` (§3 y la tabla
   de Tool 3 que dice "400 con HTML" sin haberlo medido).
-- [ ] **T2 — Verificar hechos externos** antes de escribirlos: requisitos de autorización de la
+- [x] **T2 — Verificar hechos externos** antes de escribirlos: requisitos de autorización de la
   spec MCP vigente, soporte OAuth de conectores remotos en Claude Desktop y Codex, piezas de
   auth del SDK TypeScript.
-- [ ] **T3 — `DISENO-API-MCP.md`**: contrato de `/api-mcp`, flujo de identidad, matriz de
+- [x] **T3 — `DISENO-API-MCP.md`** — `b0a71c2`: contrato de `/api-mcp`, flujo de identidad, matriz de
   permisos, formato de auditoría, riesgos y preguntas para el CRM.
-- [ ] **T4 — Propuesta v2.6**: la identidad por persona deja de estar bloqueada por la migración
+- [x] **T4 — Propuesta v2.6** — `cc07121`: la identidad por persona deja de estar bloqueada por la migración
   de contraseñas; producción remota con HTTPS + OAuth; referencia al documento nuevo.
 - [ ] **T5 — Pasarle el diseño a green-cloud** para contrastarlo con el CRM.
 
@@ -34,3 +34,8 @@ rol → tools y el registro de auditoría. Roles de ejemplo: Secretaría Académ
 
 - **2026-09-24** — Medido contra prod: todos los errores de `/api` ya vuelven en JSON con su
   status real (401/403/400/405). El cliente solo trataba 3xx como autenticación.
+- **2026-09-24** — T1 `aeb4d2a` (revisión `review-012d3a2bd532d088` aprobada). T2: spec vigente
+  2026-07-28 (se aleja de DCR hacia CIMD, valida `iss`); Claude y Codex soportan OAuth con CIMD;
+  el SDK instalado 1.30.0 implementa 2025-11-25 y hay betas para 2026-07-28. T3 `b0a71c2`.
+  T4 delegado a gentle-ai-worker, verificado por lectura. Pendiente para green-cloud: el
+  nombre real de la tabla (`SERVICIO_API` vs `SERVICIOS_API`, los documentos usan los dos).
