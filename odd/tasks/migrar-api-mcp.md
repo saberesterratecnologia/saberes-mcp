@@ -32,9 +32,9 @@ sumar `buscar_comision`.
 - [x] **T1 — Documentar** — `dab38e1` el alcance de cuatro organizaciones y el contrato medido de
   `/api-mcp` en `DISENO-API-MCP.md`.
 - [x] **T2 — Cliente de `/api-mcp`** — `c2c3ea7` con su contrato de errores, tests con fetch inyectado.
-- [ ] **T3 — `detalle_comision` sobre `comision`**.
-- [ ] **T4 — `buscar_comision` sobre `buscar_comisiones`** (tool nueva, paginada).
-- [ ] **T5 — `listar_cursos` sobre `cursos_disponibles`** (espera el campo `organizacion`).
+- [x] **T3 — `detalle_comision` sobre `comision`** — `a539b87`.
+- [x] **T4 — `buscar_comision` sobre `buscar_comisiones`** — `a539b87` (tool nueva, paginada).
+- [x] **T5 — `listar_cursos` sobre `cursos_disponibles`** — `a539b87` (espera el campo `organizacion`).
 - [ ] **T6 — Borrar la capa accidental** y el cliente de `/api`; configuración nueva.
 - [ ] **T7 — e2e contra producción + Claude Desktop** apuntando al token nuevo.
 - [ ] **T8 — Quitarle al cliente 14 las 4 acciones de `/api`** (CRM; decisión de Max).
@@ -44,3 +44,11 @@ sumar `buscar_comision`.
 - **2026-09-24** — `/api-mcp` en producción. e2e completo desde curl con el token del cliente
   15. Max decidió no rotar la clave de WhatsApp que quedó en el log local de green-cloud.
 - **2026-09-24** — T2 `c2c3ea7`: cliente con validación zod (`contract_changed`), 69 tests. Probado contra prod: 28 cursos **ya con `organizacion`** (green-cloud lo deployó), 404 → null, paginación por cursor, token falso → 401.
+- **2026-09-24** — T3–T5 en un solo commit `a539b87` a propósito: mover las tres tools de backend es
+  atómico, así ningún commit deja al servidor con dos clientes. 97 tests. e2e con cliente MCP
+  por stdio contra prod: 3 tools, 4 organizaciones, las tres "Apicultura" distinguibles, detalle
+  limpio, "no existe" explícito, cero `S/D`/`bot_contexto`/WhatsApp.
+- **2026-09-24** — 🔴 **Bloquea T7:** `/api-mcp` devuelve `moneda: "ARS"` fijo, y los montos de
+  Uruguay (2691: cuota 690) y Paraguay (2694: inscripción 140000) no son pesos argentinos. El
+  agente afirmaría precios falsos. Pedido al CRM: moneda según el país de la organización, o
+  `null` si no se puede determinar. No se conecta a Claude Desktop hasta que esté corregido.
