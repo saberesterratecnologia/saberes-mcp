@@ -29,7 +29,7 @@ sumar `buscar_comision`.
 
 ## Tareas
 
-- [ ] **T1 — Documentar** el alcance de cuatro organizaciones y el contrato medido de
+- [x] **T1 — Documentar** — `dab38e1` el alcance de cuatro organizaciones y el contrato medido de
   `/api-mcp` en `DISENO-API-MCP.md`.
 - [ ] **T2 — Cliente de `/api-mcp`** con su contrato de errores, tests con fetch inyectado.
 - [ ] **T3 — `detalle_comision` sobre `comision`**.
