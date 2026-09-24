@@ -64,3 +64,8 @@ sumar `buscar_comision`.
   Argentina pesos. 86 tests. **T7 desbloqueada.**
 - **2026-09-24** — Hallazgo del CRM fuera de alcance: `/api` (SP de Prometheo) formatea los montos
   de las 14 comisiones de Uruguay y Paraguay con "$", como si fueran pesos. Afecta al bot hoy.
+- **2026-09-24** — T7 (parte técnica): el config de Claude Desktop (MSIX) tenía `SABERES_API_URL`
+  fijo en `/api`, así que con el código nuevo todas las tools habrían fallado. Actualizado con
+  backup `claude_desktop_config.json.bak-20260924-182553`: URL → `/api-mcp`, token → cliente 15
+  (escrito sin mostrarse). Simulación con el mismo `command`/`args`/`env` del config: 3 tools OK
+  contra producción. Falta que Max reinicie Claude Desktop y pruebe en un chat normal.
