@@ -1,17 +1,35 @@
 # Propuesta: Integración de Agentes de IA en la Organización
 
 **Fecha:** Septiembre 2026
-**Última actualización:** 23/09/2026
+**Última actualización:** 24/09/2026
 **Estado:** Propuesta de viabilidad — **Fase 0 ejecutada y validada en producción**
-**Versión:** 2.5
+**Versión:** 2.6
 **Revisión de protocolo MCP:** 2026-07-28
 **Área piloto definida:** Secretaría Académica
+**Documentos complementarios:** `DISENO-API-MCP.md` (endpoint, identidad, permisos y auditoría) · `DISENO-TOOLS-MCP.md` (contrato de cada tool)
 
 ---
 
 ## Cambios respecto de versiones anteriores
 
 La v1.5 se escribió en julio de 2026 sin relevar el código de Saberes-Terra. Esta revisión corrige el documento contra dos fuentes: el estado real del ecosistema MCP a septiembre de 2026, y un relevamiento directo del repositorio del CRM.
+
+### Correcciones de la v2.6 — endpoint propio, identidad por persona y auditoría (24/09/2026)
+
+Esta versión incorpora el diseño de **`DISENO-API-MCP.md`**, que define cómo el MCP sabe **quién** lo usa, **qué** puede hacer cada persona y **qué** hizo. Son decisiones de Max del 24/09/2026, apoyadas en una auditoría de contrato del lado del CRM hecha ese mismo día.
+
+| # | Decisión o hallazgo | Consecuencia |
+|---|---|---|
+| S | **El MCP tiene su propio endpoint en el CRM: `/api-mcp`** (patrón *Backend-for-Frontend*). No se toca `/api` ni a sus consumidores (el bot Prometheo, la mesa de ayuda, el envío de emails) | La auditoría de contrato del 24/09 (sesión del CRM «green-cloud») mostró que el prompt de Prometheo **depende** del centinela `"S/D"` y de que «no encontrado» devuelva `200`: arreglar `/api` en su lugar rompería el bot. Un contrato limpio y dedicado **elimina la capa de traducción accidental** del MCP sin tocar a nadie |
+| T | **La identidad por persona reutiliza el login del CRM, y el MCP nunca ve una contraseña.** La persona se autentica en una página del propio CRM (`/mcp-autorizar`, sesión normal + consentimiento), que le entrega al MCP un **código de un solo uso** canjeado por **canal trasero**. El MCP corre la maquinaria OAuth 2.1 (servidor de autorización + recurso protegido) | **No hay IdP separado** (Logto/Keycloak) federado contra `USUARIOS`, **ni login propio del MCP**. El CRM sigue siendo el único que valida contraseñas |
+| U | **Corrección principal de esta versión:** la migración de contraseñas a hash con salt **sigue siendo necesaria como tema de seguridad del CRM**, pero **ya no es prerrequisito** de la identidad por persona de este proyecto | El razonamiento de la v2.1–v2.5 («prerrequisito duro») aplicaba a un **IdP federado que validara contra la tabla de contraseñas**. Ese ya no es el diseño: **nada fuera del CRM valida contraseñas**, así que el defecto no se propaga ni crece |
+| V | **Permisos por rol y auditoría por persona son requisito de la producción multiusuario**, no una fase opcional posterior | Regla del diseño: **no se habilita a más de una persona hasta que identidad, permisos y auditoría estén los tres** |
+| W | **El alcance del agente por rol es una tabla explícita del CRM (`MCP_ALCANCE_ROL`)**, no se deriva de los permisos del CRM | Evita que un **sysadmin quede sin límite** a través del agente. Acceso efectivo = tools del rol ∩ reglas de datos de la persona (aplicadas por el CRM en `/api-mcp` vía `X-Acting-Person`) |
+| X | **Auditoría de toda llamada a tool**: quién, cuándo, qué tool, parámetros sanitizados, resultado, cantidad y latencia. Archivo local *append-only* primero, envío por lotes a una tabla `MCP_AUDITORIA` del CRM | El **dashboard lo consume el CRM**, al final. **Sin Grafana.** Límite honesto: el MCP ve **llamadas a tools, no conversaciones** |
+| Y | **El CRM arregló su contrato de errores el 21/09/2026** (`existingResponse="Auto"`, commit `e9746a91` del CRM): todos los errores de `/api` devuelven **JSON con su status real**, y un token inválido da **`401`**, no `302` | Cae el hallazgo H de la v2.4. El cliente del MCP se adaptó al `401` el 24/09/2026 |
+| Z | **Verificado el 24/09/2026:** los conectores remotos propios de Claude están disponibles en Free, Pro, Max, Team y Enterprise; en Team/Enterprise **solo los Owners los agregan y cada persona se autentica individualmente**. Claude soporta OAuth con DCR y con **CIMD**; Codex soporta Streamable HTTP con OAuth incluido CIMD | La spec vigente **2026-07-28 se aleja de DCR hacia CIMD**: este MCP acepta CIMD y **no ofrece DCR**. El SDK instalado (1.30.0) implementa el protocolo **2025-11-25**; hay **betas** para la 2026-07-28 |
+
+> 📄 El diseño completo —flujo de autorización paso a paso, contrato de `/api-mcp`, matriz de permisos, campos de auditoría y preguntas abiertas para el CRM— está en **`DISENO-API-MCP.md`**.
 
 ### Correcciones de la v2.5 — el MCP Server va en el VPS existente (23/09/2026)
 
@@ -104,10 +122,12 @@ El área piloto queda definida: **Secretaría Académica**.
 3. [Problema a Resolver](#problema-a-resolver)
 4. [Solución Propuesta](#solución-propuesta)
 5. [¿Por qué MCP y no APIs directas?](#por-qué-mcp-y-no-apis-directas)
+   - [`/api-mcp`: un endpoint propio para el agente](#api-mcp-un-endpoint-propio-para-el-agente)
 6. [El protocolo MCP hoy (revisión 2026-07-28)](#el-protocolo-mcp-hoy-revisión-2026-07-28)
 7. [Arquitectura del Sistema](#arquitectura-del-sistema)
 8. [Componentes del Sistema](#componentes-del-sistema)
    - [2b. Diseño de las tools: de acción RPC a herramienta de agente](#2b-diseño-de-las-tools-de-acción-rpc-a-herramienta-de-agente)
+   - [3. Identidad por persona: reutilizar el login del CRM](#3-identidad-por-persona--reutilizar-el-login-del-crm)
 9. [Configuración Inicial y Puesta en Marcha](#configuración-inicial-y-puesta-en-marcha)
 10. [Autenticación, Permisos y Auditoría](#autenticación-permisos-y-auditoría)
 11. [Casos de Uso por Área](#casos-de-uso-por-área)
@@ -128,13 +148,15 @@ Se propone integrar agentes de inteligencia artificial en las distintas áreas d
 
 **El hallazgo que cambia la ecuación:** Saberes-Terra **ya tiene una capa de API con autenticación por token y permisos granulares por acción**. La Fase 1 no requiere construir esa capa: requiere dar de alta un cliente API nuevo, acotado a lectura, y escribir el MCP Server que lo consume. Buena parte de las herramientas iniciales no necesitan **ni una línea de código nuevo en el CRM**.
 
-**Alcance de la primera fase:** deliberadamente acotado. Un MCP Server con herramientas de solo lectura, autenticación máquina-a-máquina, y un área piloto. Sin capa de memoria, sin orquestador, sin operaciones de escritura, sin identidad por usuario final.
+**Alcance de la primera fase:** deliberadamente acotado. Un MCP Server con herramientas de solo lectura sobre un endpoint dedicado del CRM (`/api-mcp`), autenticación máquina-a-máquina y **una sola persona**. Sin capa de memoria, sin orquestador, sin operaciones de escritura.
+
+**La regla que gobierna el paso siguiente (24/09/2026):** **no se habilita a más de una persona hasta que identidad por persona, permisos por rol y auditoría estén los tres.** No son fases opcionales sucesivas: son el requisito de la producción multiusuario, y se diseñan juntas en `DISENO-API-MCP.md`.
 
 **Inversión estimada:** **$0 de infraestructura nueva** — el MCP Server corre en el VPS Windows que ya opera la organización (decisión del 23/09/2026, con riesgo aceptado) —, más las suscripciones de chat que ya se pagan, más las horas de desarrollo interno.
 
 **Dos temas que exceden esta propuesta y requieren decisión de dirección:**
 1. **Migrar el servidor de producción.** Ya está determinado: es **Windows Server 2012 R2**, cuyo soporte terminó el **10 de octubre de 2023**, sin ESU y **sin parches de seguridad desde el 9 de noviembre de 2023**. Con la decisión del 23/09/2026 de alojar el MCP Server en esa misma máquina, la migración pasa a ser también un prerrequisito de este proyecto.
-2. Las contraseñas de usuario están almacenadas con cifrado reversible. Es un defecto de seguridad preexistente que además bloquea la evolución natural de este proyecto.
+2. Las contraseñas de usuario están almacenadas con cifrado reversible. Es un defecto de seguridad preexistente del CRM que hay que corregir. **Corrección de la v2.6:** a partir del diseño del 24/09/2026 **ya no bloquea la identidad por persona de este proyecto**, porque el MCP nunca valida contraseñas —lo sigue haciendo el CRM, en su propia página. Deja de ser prerrequisito y vuelve a ser lo que siempre fue: una decisión de seguridad del CRM, a estimar y aprobar por separado.
 
 Ver [Riesgos](#riesgos-y-mitigaciones).
 
@@ -216,9 +238,9 @@ MCP (Model Context Protocol) es un protocolo abierto que permite conectar aplica
 |---|---|---|---|
 | MCP Server + tools de lectura | Fase 1 | **Fase 1** | Núcleo de la propuesta |
 | Autenticación máquina-a-máquina | — | **Fase 1** | Ya existe en el CRM, es gratis |
-| Auditoría | Fase 1 | **Fase 1** | Requisito para operar sobre datos reales |
-| **Identidad por usuario final (IdP)** | Fase 1 | **Fase 2** | Bloqueado por el esquema de contraseñas |
-| Operaciones de escritura | Fase 1 | Fase 2 | Primero validar lectura con usuarios reales |
+| Auditoría por persona | Fase 1 | **Fase 2 — junto con identidad y permisos** | Sin identidad no atribuye nada a nadie. Requisito de la producción multiusuario, no fase opcional |
+| **Identidad por usuario final** | Fase 1 | **Fase 2 — junto con permisos y auditoría** | Requiere `/api-mcp`, la página `/mcp-autorizar` del CRM y el transporte HTTPS remoto. **Ya no depende del esquema de contraseñas**: la contraseña la sigue validando solo el CRM |
+| Operaciones de escritura | Fase 1 | **Después del multiusuario de lectura** | Primero validar lectura con personas reales, con identidad y auditoría ya en pie |
 | Estado de lanzamiento de curso | Fase 1 | Fase 3 | No existe; hay que construirlo en el CRM |
 | Mem0 + Qdrant + PostgreSQL | Fase 0 | Fase 4, si se justifica | Infraestructura pesada para necesidad no confirmada |
 | Agente orquestador | Fase 3 | Fase 4 | Depende de que las áreas ya usen sus agentes |
@@ -251,13 +273,29 @@ MCP (Model Context Protocol) es un protocolo abierto que permite conectar aplica
 App de chat (ChatGPT / Claude)
     ↓ habla MCP (protocolo de IA)
 MCP Server (capa nueva, Node.js 22 portable, VPS Windows existente)
-    ↓ habla el protocolo RPC de /api con X-Api-Token
-API Saberes (api_saberes.vb — YA EXISTE)
+    ↓ habla RPC sobre HTTPS con X-Api-Token (+ X-Acting-Person)
+CRM — endpoint que consume el MCP
+    ├─ hoy (spike):  POST /api      → api_saberes.vb  · YA EXISTE
+    └─ destino:      POST /api-mcp  → handler propio  · A CONSTRUIR
     ↓ habla LINQ to SQL
 SQL Server Express (Saberes-Terra)
 ```
 
-La capa que agregamos es una sola: el MCP Server. Todo lo de abajo ya está construido y en producción.
+Del lado del agente, la capa que agregamos es una sola: el MCP Server. Del lado del CRM se agrega **un endpoint dedicado, `/api-mcp`** (ver abajo). Todo lo demás ya está construido y en producción.
+
+#### `/api-mcp`: un endpoint propio para el agente
+
+**Decisión (24/09/2026, Max):** el MCP deja de consumir `/api` y pasa a consumir **`/api-mcp`**, un endpoint nuevo del CRM con handler propio, pensado **solo** para el agente. Es el patrón *Backend-for-Frontend*: un consumidor con necesidades distintas recibe su propia fachada. Precedente en el repo: `/api-presencia` (21/09/2026).
+
+**Por qué no arreglar `/api` en su lugar.** La auditoría de contrato del 24/09/2026 mostró que `/api` **no está roto: está adaptado a otro consumidor**. El prompt del bot Prometheo depende del centinela `"S/D"` y de que «no encontrado» devuelva `200`. Normalizar `/api` en su lugar arreglaría al MCP y **rompería al bot**, a la mesa de ayuda y al envío de emails. Un endpoint dedicado le da al agente el contrato que necesita **sin tocar a un solo consumidor existente**.
+
+**Qué resuelve.** Desaparece toda la traducción *accidental* que hoy carga el MCP Server —convertir `"S/D"` en campo ausente, deshacer el `UPPER`, interpretar montos formateados como texto, desambiguar `200 + data: null`— porque **el dato sale bien de origen**: `null` en vez de `"S/D"`, fechas ISO 8601, números como números, `404` cuando algo no existe, errores en JSON con su status real, paginación en toda colección y únicamente los campos que las tools proyectan. Lo que queda en el MCP es la traducción *esencial* —de lenguaje natural a identificadores, y de datos a herramientas de trabajo—, que es donde está su valor.
+
+**Contrato independiente, reglas de negocio compartidas.** Es una fachada, no una segunda lógica de negocio. «Comisión disponible» se define **una sola vez** (una vista o función SQL única) y la usan tanto `/api` como `/api-mcp`. Dos definiciones de «vigente» conviviendo en el mismo CRM es exactamente lo que este diseño evita.
+
+**Además, `/api-mcp` es el lugar por donde entra la identidad:** lleva `X-Acting-Person` desde el primer día de diseño, para que el CRM aplique las reglas de datos de cada persona sin que el MCP tenga que reimplementarlas.
+
+> 📄 Contrato completo —acciones, forma de las respuestas, tabla de errores y ejemplos— en **`DISENO-API-MCP.md` §4**.
 
 ---
 
@@ -291,7 +329,7 @@ Los resultados de `tools/list` requieren `ttlMs` y `cacheScope` (`public` o `pri
 
 Cuando el servidor necesita información adicional, devuelve un resultado `input_required`; el cliente reintenta la request original con las respuestas.
 
-**Para qué nos sirve:** confirmaciones antes de operaciones sensibles, en Fase 2. "Vas a enviar esta campaña a 165 personas, ¿confirmás?"
+**Para qué nos sirve:** confirmaciones antes de operaciones sensibles, cuando lleguen las tools de escritura. "Vas a enviar esta campaña a 165 personas, ¿confirmás?"
 
 ### Funcionalidades deprecadas
 
@@ -464,6 +502,17 @@ Esta sección reemplaza por completo la lista de endpoints inventada en versione
 
 `recuperar_propuestas`, `recuperar_persona_comision`, `verificar_estudiante`, `recuperar_comisiones_x_dni`, `buscar_localidades`, `recuperar_plantilla_info`, `consultar_informe_pago`, `recuperar_comision_x_id`, `recuperar_clases_x_comision`, `recuperar_comisiones_disponibles`, `recuperar_cursos_disponibles`, `recuperar_plantilla_destinatario`, `recuperar_contactos_x_id_organizacion`, `recuperar_organizacion_x_id`, `recuperar_curso_x_id`, `recuperar_arancel_mesa_x_curso`, `recuperar_procedimientos`, `recuperar_procedimiento`, `recuperar_excepciones`, `recuperar_excepcion`, `mesa_ayuda_recuperar_tickets`.
 
+#### Actualización de la v2.6: el MCP deja de consumir `/api`
+
+Todo lo anterior describe `/api`, que el spike consume hoy y que **no se toca**. A partir de la decisión del 24/09/2026 el MCP pasa a consumir **`/api-mcp`**, un endpoint dedicado con handler propio y contrato limpio, mientras `/api` sigue sirviendo sin cambios a Prometheo, a la mesa de ayuda y al envío de emails.
+
+Dos correcciones puntuales sobre esta sección, verificadas el 24/09/2026:
+
+- **El contrato de errores de `/api` ya no está roto.** El CRM lo arregló el 21/09/2026 (`existingResponse="Auto"`, commit `e9746a91`): todos los errores devuelven **JSON con su status real** y un token inválido da **`401`**, no un `302` al login. El cliente del MCP se adaptó el 24/09/2026. El hallazgo H de la v2.4 queda saldado.
+- **`200` con `data: null` para «no encontrado» sigue vigente en `/api`**, y así debe quedar: el prompt de Prometheo depende de eso. En `/api-mcp`, en cambio, «no existe» devuelve `404`.
+
+Ver [`/api-mcp`: un endpoint propio para el agente](#api-mcp-un-endpoint-propio-para-el-agente) y `DISENO-API-MCP.md` §4.
+
 ### 2. MCP Server — a construir
 
 **Tecnología:** **Node.js 22 LTS** con el SDK oficial de TypeScript.
@@ -614,6 +663,8 @@ Pero `data: null` encubre dos situaciones operativamente opuestas:
 
 La capa de traducción debe desambiguarlas — si hace falta, con una segunda llamada de verificación. Es trabajo adicional, y es precisamente el trabajo que evita que el agente afirme algo falso con total seguridad.
 
+> **Actualización v2.6:** esto describe el trabajo contra `/api`, que es como corre el spike hoy. Con **`/api-mcp`** la ambigüedad **se resuelve en origen**: «no existe» devuelve `404` y «existe pero vacío» devuelve `200` con una colección vacía, sin segunda llamada de verificación. Lo mismo vale para `"S/D"`, el `UPPER` y los montos formateados como texto: la **traducción accidental desaparece**; queda la esencial. Ver [`/api-mcp`](#api-mcp-un-endpoint-propio-para-el-agente).
+
 #### Resumen del trabajo real del MCP Server
 
 No se "exponen" los endpoints. Se escribe una capa que asume estas responsabilidades:
@@ -631,13 +682,24 @@ No se "exponen" los endpoints. Se escribe una capa que asume estas responsabilid
 
 Es más trabajo que un proxy. Es la diferencia entre un sistema técnicamente conectado y uno que el área usa sin que haya que recordárselo.
 
+> **Actualización v2.6:** con `/api-mcp`, las filas de **normalización**, **renombrado** y **desambiguación de errores** dejan de ser trabajo del MCP y pasan a resolverse en el contrato del CRM. Las que quedan —resolución de identidad, proyección por tarea, contención de carga, auditoría y permisos— son las que de verdad justifican esta capa. La fila de **permisos**, además, deja de ser «catálogo filtrado por conector de área» y pasa a ser **alcance efectivo por persona** (ver [Autenticación, Permisos y Auditoría](#autenticación-permisos-y-auditoría)).
+
 > 📄 **El contrato exacto de las cuatro tools** — `inputSchema`, mapeo de campos, manejo de errores, diseño del índice cacheado y checklist de implementación — está en el documento complementario **`DISENO-TOOLS-MCP.md`**. Este documento define el *qué* y el *por qué*; aquel define el *cómo*.
 
-### 3. Identity Provider — Fase 2, con prerrequisito
+### 3. Identidad por persona — reutilizar el login del CRM
 
-**Estado: pospuesto.** La v2.0 proponía federar un IdP (Logto/Keycloak) contra los usuarios de Saberes en Fase 1. El relevamiento del código lo desaconseja.
+**Decisión (24/09/2026, Max):** la identidad por usuario final **reutiliza el login del CRM**, y **el MCP nunca ve una contraseña**. No hay Identity Provider separado ni login propio del MCP.
 
-**El bloqueante:** las contraseñas de `dbo.USUARIOS` **no están hasheadas**. Están cifradas con 3DES simétrico, con la clave derivada del propio nombre de usuario:
+**El principio:** la persona se autentica en una página del propio CRM (`/mcp-autorizar`), con la sesión de siempre, y da su consentimiento explícito. El CRM entrega un **código de un solo uso** que el MCP **canjea por canal trasero** contra `/api-mcp`; recién entonces el MCP sabe qué persona es. La maquinaria OAuth 2.1 —`/authorize`, `/token`, `/revoke`, metadatos RFC 8414 y RFC 9728, PKCE, tokens rotativos— corre en el MCP, que es donde hay librerías maduras.
+
+```
+App de chat → MCP /authorize → CRM /mcp-autorizar (sesión + consentimiento)
+                             ← código de un solo uso (60 s)
+MCP → /api-mcp canjear_codigo_autorizacion (canal trasero) → id_persona
+MCP → emite su propio access token (1 h) + refresh rotativo (30 d) a la app
+```
+
+**Por qué se descartó el IdP federado (Logto/Keycloak) que proponía la v2.0:** ese diseño exigía que un segundo sistema **validara credenciales contra la tabla `USUARIOS`**. Y las contraseñas de `dbo.USUARIOS` **no están hasheadas**: están cifradas con 3DES simétrico, con la clave derivada del propio nombre de usuario, de forma reversible.
 
 ```
 Negocio/usuariosAccesoDatos.vb:548
@@ -646,13 +708,34 @@ Negocio/usuariosAccesoDatos.vb:409
   Return desencriptar(consulta.FirstOrDefault.contraseña.Trim, ...)
 ```
 
-Es **reversible**: existe `recuperar_contraseña(id_persona)` que devuelve la clave en texto plano. No hay salt, no hay función de derivación, no hay hash.
+Existe `recuperar_contraseña(id_persona)` que devuelve la clave en texto plano. No hay salt, no hay función de derivación, no hay hash. Federar un IdP contra ese esquema habría **propagado el defecto a un segundo sistema** y a una superficie nueva expuesta a internet. Por eso la v2.1 a la v2.5 lo bloqueaban, y tenían razón **para ese diseño**.
 
-**Por qué esto bloquea el IdP:** si el IdP valida credenciales contra ese esquema, se propaga el defecto a un segundo sistema y a una superficie nueva expuesta a internet. La superficie de exposición crece en lugar de contenerse.
+También se descartó un **login propio del MCP** (dos padrones de usuarios y dos juegos de roles: alguien dado de baja en el CRM seguiría entrando por el MCP) y un **servidor OAuth completo dentro del CRM** (implementar OAuth 2.1, metadatos y PKCE en WebForms / .NET Framework, sin librerías actuales, es la pieza más riesgosa de todo el proyecto).
 
-**Prerrequisito duro para la Fase 2:** migrar `USUARIOS.contraseña` a un hash con salt (bcrypt, PBKDF2 o Argon2). Es un cambio acotado —login, alta de usuario, cambio de clave, y una migración con doble escritura durante la transición— pero **no es gratis y debe estimarse por separado**. Meterlo escondido dentro de "integrar MCP" rompe la estimación y oculta un trabajo de seguridad que merece su propia aprobación.
+#### ⚠️ Corrección de la v2.6: el esquema de contraseñas ya no es prerrequisito de este proyecto
 
-**Qué hacemos mientras tanto:** ver la sección siguiente.
+Lo que sigue es la corrección más importante de esta versión, y conviene decirla sin maquillaje:
+
+- **Lo que decían la v2.1 a la v2.5:** migrar `USUARIOS.contraseña` a hash con salt era un *«prerrequisito duro»* de la identidad por usuario final.
+- **Por qué lo decían:** porque el diseño de entonces era un **IdP federado validando contra la tabla de contraseñas**. Ese razonamiento era correcto para ese diseño.
+- **Por qué ya no aplica:** en el diseño del 24/09/2026 **nada fuera del CRM valida contraseñas**. El CRM las sigue validando en su propia página, con su propio mecanismo. El defecto **no se copia a ningún lado ni crece**.
+- **Lo que no cambia:** guardar contraseñas de forma reversible **sigue siendo un problema de seguridad real del CRM** y hay que arreglarlo. Migrar a bcrypt, PBKDF2 o Argon2 es un trabajo acotado —login, alta de usuario, cambio de clave y una migración con doble escritura— que **debe estimarse y aprobarse por separado**, como tema de seguridad del CRM. Ver [Riesgo 2](#-riesgo-2--contraseñas-almacenadas-con-cifrado-reversible).
+
+En una frase: **deja de ser un bloqueante de este proyecto y vuelve a ser lo que siempre fue, una deuda de seguridad del CRM.**
+
+#### Lo que hay que construir de cada lado
+
+| CRM | MCP |
+|---|---|
+| Página `/mcp-autorizar`: sesión del CRM + consentimiento + código de un uso | Servidor de autorización: `/authorize`, `/token`, `/revoke` + metadatos RFC 8414 |
+| Acción `canjear_codigo_autorizacion` en `/api-mcp` | Metadatos RFC 9728 y `401` con `WWW-Authenticate` en `/mcp` |
+| Tablas de códigos de un uso y de concesiones | Almacén de tokens (solo hashes, nunca el token en claro) |
+| Pantalla «mis conexiones» para revocar | Transporte Streamable HTTP sobre HTTPS (hoy es stdio) |
+| Marca en `SERVICIO_API` de qué cliente puede actuar en nombre de personas | Envío de `X-Acting-Person` a `/api-mcp` |
+
+**Baja y revocación:** el MCP consulta `resolver_acceso` en cada llamada, con caché de hasta 5 minutos. Una persona dada de baja en el CRM pierde el acceso al agente en ese plazo, **sin que nadie tenga que acordarse del MCP**.
+
+> 📄 Flujo completo paso a paso, vida de los tokens, requisitos de la spec 2026-07-28 y alternativas descartadas: **`DISENO-API-MCP.md` §2**.
 
 ### 4. Aplicación de Chat (Harness)
 
@@ -712,7 +795,9 @@ Ver [Dónde vive el MCP Server: decisión con riesgo aceptado](#dónde-vive-el-m
 2. **Cargar `acciones_permitidas`** con la lista blanca de acciones de lectura de cada área
 3. ~~**Permitir el tráfico** desde la IP del VPS Linux~~ — **ya no aplica.** El MCP corre en la misma máquina que la API; queda por **evaluar** si la llamada a `POST /api` se resuelve por localhost
 
-**No se modifica una sola línea de la aplicación existente.** Esto es configuración, no desarrollo.
+**Para el piloto de una persona no se modifica una sola línea de la aplicación existente.** Eso es configuración, no desarrollo.
+
+**Lo que sí requiere desarrollo en el CRM, a partir de la decisión del 24/09/2026:** el endpoint `/api-mcp`, la página `/mcp-autorizar`, las tablas `MCP_ALCANCE_ROL` y `MCP_AUDITORIA`, y la pantalla «mis conexiones». Nada de eso toca `/api` ni a sus consumidores actuales. El reparto exacto de qué construye cada lado está en `DISENO-API-MCP.md` §7.
 
 ### En cada PC del equipo
 
@@ -728,70 +813,116 @@ No se instala Node.js, Python ni ninguna dependencia.
 
 ## Autenticación, Permisos y Auditoría
 
-### Fase 1: máquina a máquina, permisos por área
+### La regla que ordena esta sección
 
-El MCP Server se autentica ante el CRM con un token de `SERVICIO_API`. No hay identidad de usuario final en esta fase.
+> **No se habilita a más de una persona hasta que identidad, permisos y auditoría estén los tres.**
 
-**Cómo se logra diferenciación por área sin identidad de usuario:** se da de alta **un cliente API por área**, cada uno con su token y su lista blanca de acciones. Se publica **un conector distinto por área** en la app de chat. Marketing recibe el conector de marketing; ventas, el de ventas.
+Es una decisión del 24/09/2026 y cambia cómo hay que leer lo que sigue. En la v2.5 la identidad por persona era «Fase 2» y la auditoría por persona un agregado posterior. Ahora son **tres piezas de un mismo requisito de producción multiusuario**, porque dependen entre sí: sin identidad no hay permisos por persona, y sin identidad la auditoría no atribuye nada a nadie.
 
-```
-Conector "Saberes · Marketing"  → MCP Server → token MKT  → acciones de marketing
-Conector "Saberes · Académica"  → MCP Server → token ACAD → acciones de académica
-Conector "Saberes · Dirección"  → MCP Server → token DIR  → todas las de lectura
-```
+El token máquina-a-máquina que ya funciona **no deja de servir**: es lo correcto para el **piloto de una sola persona**, donde «quién hizo qué» no es ambiguo. Lo que no es correcto es estirarlo a un equipo.
 
-**Qué da esto:**
+### Piloto de una persona: máquina a máquina
+
+El MCP Server se autentica ante el CRM con un token de `SERVICIO_API` (`mcp-secretaria-academica`, id 14). El token dice **qué sistema llama**, no **quién**.
 
 | ✅ Lo que sí resuelve | ⚠️ Lo que no resuelve |
 |---|---|
-| Separación real de permisos por área | La auditoría registra el área, **no la persona** |
-| Cero código nuevo en el CRM | Si alguien recibe el conector equivocado, tiene los permisos de esa área |
-| Las tools de otra área no existen para el usuario | No hay revocación individual: se revoca el área entera |
-| Elimina el IdP del camino crítico | No sirve para operaciones de escritura |
+| Autenticación real contra el CRM, ya validada en producción | La auditoría registra el **cliente**, no la persona |
+| Límite de acciones por lista blanca (`acciones_permitidas`) | No hay revocación individual |
+| Cero código nuevo en el CRM para arrancar | No hay permisos por rol ni por persona |
+| Suficiente para un piloto de **una** persona | **No sirve para escritura**: sin identidad individual no hay responsabilidad atribuible |
 
-**Esta es una solución de Fase 1, explícitamente transitoria.** Es adecuada para lectura con un equipo piloto chico, donde el conjunto de personas por área se conoce. **No es adecuada para escritura**, porque sin identidad individual no hay responsabilidad atribuible sobre una operación que modifica datos.
+**Es explícitamente transitorio.** La v2.5 proponía estirarlo a un equipo con **un cliente API y un conector por área**. Esa alternativa **queda descartada como destino**: separa por área y no por persona, quien recibe el conector equivocado se queda con los permisos de esa área, y la revocación es del área entera. Sirve como escalón intermedio corto, nunca como estado final.
 
-### Fase 2: identidad por usuario final
+### Producción multiusuario: identidad + permisos + auditoría
 
-Requiere el IdP federado, que a su vez requiere la migración del esquema de contraseñas. El flujo objetivo:
+#### 1. Identidad por persona
+
+La persona inicia sesión **en el CRM** y autoriza al agente; el MCP recibe su identidad por canal trasero y emite sus propios tokens. Flujo objetivo:
 
 ```
-1. La app intenta usar el MCP Server sin token
-   → 401 con WWW-Authenticate indicando dónde está la metadata
-     de recurso protegido (RFC 9728)
-2. La app descubre el authorization server → nuestro IdP
-3. La app se identifica mediante Client ID Metadata Document
-4. Se abre el navegador → login con credenciales de Saberes
-5. El IdP valida y emite un access token con el rol como claim
-   y audiencia = nuestro MCP Server
-6. El MCP Server valida firma, expiración y audiencia en cada llamada
+1. La app usa el MCP Server sin token
+   → 401 con WWW-Authenticate apuntando a la metadata de recurso
+     protegido (RFC 9728)
+2. La app descubre el authorization server (RFC 8414) → el propio MCP
+3. La app se identifica mediante su Client ID Metadata Document (CIMD)
+4. Se abre el navegador → CRM /mcp-autorizar: sesión normal del CRM
+   + pantalla de consentimiento
+5. El CRM devuelve un código de un solo uso; el MCP lo canjea por canal
+   trasero contra /api-mcp y obtiene el id_persona
+6. El MCP emite access token (1 h) y refresh rotativo (30 d), con
+   audiencia = este MCP Server (RFC 8707), y los valida en cada llamada
 ```
 
-**Sobre Client ID Metadata Documents:** en la revisión 2026-07-28, DCR quedó deprecado en favor de CIMD. Ambos funcionan durante la ventana de deprecación, y tanto ChatGPT como Claude soportan los dos. Con DCR, cada instalación se registra dinámicamente, generando un cliente nuevo por máquina; con CIMD, el cliente se identifica mediante una URL a su propio documento de metadata. **Recomendación:** elegir un IdP que ya soporte CIMD, con DCR como respaldo.
+Detalle completo en [3. Identidad por persona](#3-identidad-por-persona--reutilizar-el-login-del-crm) y en `DISENO-API-MCP.md` §2.
 
-### Sobre el modelo de roles existente
+**Sobre el registro de clientes: CIMD sí, DCR no.** En la revisión 2026-07-28 DCR quedó deprecado en favor de **Client ID Metadata Documents**, y el orden recomendado por la spec es preregistro, CIMD, y DCR solo por compatibilidad. Verificado el 24/09/2026: **Claude soporta OAuth con DCR y con CIMD**, y **Codex soporta Streamable HTTP con OAuth incluido CIMD**. Decisión para este MCP:
+
+- **acepta CIMD**;
+- **no ofrece DCR**: la spec se está alejando de él y habilita clientes anónimos;
+- mantiene una **lista explícita de `client_id` permitidos** (Claude, Codex y, si se decide, ChatGPT). Una app desconocida no llega ni a la pantalla de consentimiento.
+
+En Claude, los conectores remotos propios están disponibles en Free, Pro, Max, Team y Enterprise; en **Team y Enterprise solo los Owners los agregan, y cada persona se autentica individualmente** —justo el comportamiento que este diseño necesita.
+
+#### 2. Permisos por rol: el alcance del agente es una tabla, no una herencia
+
+```
+acceso efectivo = tools permitidas para el rol   (tabla MCP_ALCANCE_ROL, en el CRM)
+                ∩ reglas de datos de la persona   (las del CRM, aplicadas en /api-mcp)
+```
+
+**Por qué el alcance no se deriva de los permisos del CRM.** En el CRM, `esSysadmin` saltea `puede_leer` y ve todo. Quien más va a usar el agente (Dirección) suele ser sysadmin: si el alcance del agente copiara los permisos del CRM, **para esas personas no habría límite alguno**. Por eso el alcance vive en una tabla aparte y explícita por rol, `MCP_ALCANCE_ROL`, administrada donde se administran los roles. Un sysadmin tiene exactamente las tools que su rol tenga asignadas ahí, ni una más.
+
+Reglas:
+
+1. **Negado por defecto.** Una persona sin rol mapeado no ve ninguna tool.
+2. **El filtrado de `tools/list` no es seguridad**, es experiencia de uso: cada `tools/call` se vuelve a chequear.
+3. **Los permisos los decide el servidor, nunca el modelo.** Ningún parámetro de una tool puede ampliar el alcance.
+4. **Defensa en profundidad:** el CRM **vuelve a chequear** en `/api-mcp`, con `X-Acting-Person`, que los datos pedidos sean coherentes con esa persona.
+
+#### 2b. El modelo de roles del CRM, y por qué no se hereda
 
 El CRM **sí tiene** un modelo de roles en base de datos:
 
 - `dbo.ROLES` (`Modelo.dbml:1916-1928`), `dbo.PERSONAS_ROLES` (N:M), `dbo.PRIVILEGIOS` + `dbo.ROLES_PRIVILEGIOS`, `dbo.VISTAS` + `dbo.VISTAS_ROLES`
 - Roles concretos: estudiante, profesor, secretaría, sysadmin, interesado, cliente, coordinador, ayudante, proveedor, sin rol
 
-**Advertencia relevante para Fase 2:** la documentación del propio CRM (`documentacion/convenciones/menu-y-control-de-acceso.md:3-8,82-119`) señala que el control de acceso real debe implementarse en cada `Page_Load`, y que ocultar el menú no protege la URL. Hay dos IDOR documentados en `documentacion/seguridad/` que lo confirman.
+**Advertencia que sigue vigente, y ahora tiene consecuencia de diseño:** la documentación del propio CRM (`documentacion/convenciones/menu-y-control-de-acceso.md:3-8,82-119`) señala que el control de acceso real debe implementarse en cada `Page_Load`, y que ocultar el menú no protege la URL. Hay dos IDOR documentados en `documentacion/seguridad/` que lo confirman.
 
-Traducción: **`ROLES_PRIVILEGIOS` es un insumo declarativo, no una garantía de enforcement.** Cuando el MCP Server consuma ese modelo en Fase 2, debe aplicar sus propias verificaciones y no asumir que el rol implica permiso efectivo.
+Traducción: **`ROLES_PRIVILEGIOS` es un insumo declarativo, no una garantía de enforcement.**
 
-### Auditoría
+**Cómo se conecta con lo anterior.** Ese enforcement desparejo es exactamente la razón por la que el diseño **no confía en una sola capa**:
 
-Cada invocación queda registrada en el MCP Server:
+- el **alcance por rol** no se hereda de `ROLES_PRIVILEGIOS`: se declara explícitamente en `MCP_ALCANCE_ROL`;
+- el **MCP** chequea ese alcance en cada `tools/call`;
+- el **CRM re-chequea** en `/api-mcp` con `X-Acting-Person`, así que un bug de permisos del MCP **no alcanza para entregar datos** fuera de las reglas de esa persona.
 
-```
-2026-09-14 14:30:00 | conector: marketing | consultar_inscriptos   | comisión 2424 | OK   | 340ms
-2026-09-14 14:35:00 | conector: ventas    | listar_cursos          | -             | OK   | 120ms
-2026-09-14 14:40:00 | conector: direccion | consultar_comision     | comisión 2424 | OK   | 210ms
-2026-09-14 14:42:00 | conector: marketing | consultar_comision     | comisión 9902 | ERROR 403
-```
+Ninguna de las tres capas asume que las otras funcionaron.
 
-En Fase 1 el registro identifica el **área**; en Fase 2, con identidad de usuario, identificará a la **persona**.
+#### 3. Auditoría por persona
+
+Cada invocación de tool queda registrada con estos campos:
+
+| Campo | Ejemplo |
+|---|---|
+| `id_evento` · `ocurrido_at` | UUID · `2026-09-24T14:03:11.402Z` (UTC) |
+| `id_persona` · `roles` | `1234` · `["secretaria"]`, al momento de la llamada |
+| `id_concesion` · `cliente` | `87` · `claude` — qué autorización y qué app se usaron |
+| `tool` · `parametros` | `detalle_comision` · `{"id_comision":2672}`, sanitizados |
+| `resultado` | `ok` / `no_encontrado` / `denegado` / `error:<tipo>` |
+| `cantidad_resultados` · `latencia_ms` | `1` · `184` — la cantidad sirve para detectar extracción masiva |
+
+Además se registran los eventos de autorización: concesión otorgada, token renovado, concesión revocada y por quién, acceso denegado por alcance, y app no permitida que intentó conectarse.
+
+**Dónde se guarda.** El MCP escribe primero en un **archivo local append-only** en `G:` (JSON Lines, rotación diaria, tope de tamaño) y un proceso envía los eventos **por lotes** a una tabla `MCP_AUDITORIA` del CRM. El archivo local va primero a propósito: si el CRM está caído el evento no se pierde, y justo cuando el CRM falla es cuando más importa tener el registro.
+
+**Datos personales en el log:** un DNI no se guarda en claro, se guarda su HMAC. Permite responder «¿quién consultó el DNI X?» sin que el log sea, él mismo, una base de DNI.
+
+**El dashboard lo consume el CRM, y va al final.** Sale de `MCP_AUDITORIA` cruzado con nombres y roles del CRM: uso por persona, tool y día; denegaciones; errores; latencia; personas con volumen anómalo de resultados. **No se usa Grafana**: sumar una herramienta de monitoreo aparte no se justifica, y el CRM ya es donde el equipo mira.
+
+> ⚠️ **Límite honesto de esta auditoría:** el MCP ve **llamadas a tools, no conversaciones**. No sabe qué le preguntaron al modelo ni qué respondió. Auditar conversaciones depende de la app de chat (función de los planes Team / Enterprise) y es un criterio más para elegirla.
+
+> 📄 Campos completos, sanitización, retención y dashboard: **`DISENO-API-MCP.md` §3 y §5**.
 
 ### Separación entre uso personal y laboral
 
@@ -889,7 +1020,7 @@ Es el área seleccionada para la Fase 1. La elección es acertada por tres motiv
 >
 > **Agente:** [vía `recuperar_clases_x_comision`]
 
-**[F2+] Enviar credenciales de autogestión** — requiere escritura, llega en Fase 2.
+**[F2+] Enviar credenciales de autogestión** — requiere escritura; llega después de que el uso multiusuario de lectura esté estable.
 
 #### Lista blanca aprobada para el cliente API de Secretaría Académica
 
@@ -1075,26 +1206,61 @@ Se implementó la tool más simple (`listar_cursos`, sin parámetros y sin PII) 
 Implementación: `github.com/saberesterratecnologia/saberes-mcp` (privado), TypeScript sobre el SDK oficial de MCP.
 
 > ⚠️ El spike corrió con transporte **stdio local**. El paso a producción multiusuario requiere **exponer el MCP por HTTPS en el servidor existente**, y eso todavía no está resuelto: hoy nginx escucha en 8443 sin TLS. Y si el equipo usara ChatGPT en vez de Claude, **stdio no es una opción**: ChatGPT solo acepta conectores remotos por HTTPS, o sea que la exposición HTTPS y OAuth dejan de ser el paso siguiente para ser el paso previo.
+>
+> **Agregado de la v2.6:** el transporte remoto por HTTPS no es solo una condición de ChatGPT. **La identidad por persona también lo exige**, en cualquier app: el flujo OAuth 2.1 necesita que el MCP publique `/authorize`, `/token` y sus metadatos, y que la app abra el navegador contra ellos. Por stdio, con el proceso corriendo en la máquina de cada persona, eso no existe. **Sin transporte remoto no hay identidad por persona, y sin identidad no se habilita a más de una persona.**
 
-### Fase 1 — Piloto de lectura (Semanas 2–5)
+### Fase 1 — Piloto de lectura, una persona (Semanas 2–5)
 
-- [ ] Construir el MCP Server con las 5 tools candidatas
+- [ ] Construir el MCP Server con las tools de lectura
 - [ ] Implementar paginación, límites y timeouts en todas las consultas
-- [ ] Implementar auditoría
-- [ ] Dar de alta un cliente `SERVICIO_API` por área, con su lista blanca
+- [ ] Implementar la auditoría local (archivo append-only en `G:`)
 - [ ] Redactar los prompts de área y las Custom Instructions de la organización
-- [ ] Pruebas con el equipo piloto e iteración según feedback
+- [ ] Pruebas con **una** persona de Secretaría Académica e iteración según feedback
 
-**Criterio de salida:** el área piloto usa el agente de forma espontánea durante dos semanas seguidas sin que haya que recordárselo.
+**Criterio de salida:** esa persona usa el agente de forma espontánea durante dos semanas seguidas sin que haya que recordárselo.
 
-### Fase 2 — Identidad y escritura (Semanas 6–12)
+### Fase 2 — Habilitar el uso multiusuario (Semanas 6–12)
 
-- [ ] **Prerrequisito: migrar `USUARIOS.contraseña` a hash con salt.** Estimar y aprobar por separado
-- [ ] Desplegar el IdP federado contra el padrón de Saberes
-- [ ] Migrar el MCP Server de token de servicio a validación de tokens de usuario
-- [ ] Agregar tools de escritura con confirmación explícita vía MRTR
-- [ ] Modo borrador para campañas antes del envío real
-- [ ] Ampliar la auditoría para registrar payload e identidad individual
+**Reestructurada en la v2.6.** Esta fase ya no es «identidad y escritura»: es **poner el agente en condiciones de que lo use más de una persona**. La escritura se corre a más adelante. El orden sigue a `DISENO-API-MCP.md` §7.
+
+> **Regla de corte:** **no se habilita a más de una persona hasta que los pasos 2, 3 y 4 estén los tres.**
+
+**1. `/api-mcp`: el endpoint dedicado**
+
+- [ ] Handler `/api-mcp` en el CRM con las acciones de datos (`cursos_disponibles`, `comision`, `buscar_comisiones`), todavía con token de servicio y sin `X-Acting-Person`
+- [ ] Definir **una sola vez** «comisión disponible» (vista o función SQL única, compartida con `/api`)
+- [ ] Migrar las tools del MCP a `/api-mcp` y **eliminar la capa de traducción accidental**
+
+**2. Identidad por persona — piloto con una persona**
+
+- [ ] Transporte **Streamable HTTP sobre HTTPS** (hoy stdio): condición previa de todo lo demás
+- [ ] Página `/mcp-autorizar` en el CRM (sesión normal + consentimiento + código de un solo uso)
+- [ ] Acción `canjear_codigo_autorizacion` en `/api-mcp` y tablas de códigos y concesiones
+- [ ] Servidor de autorización del MCP: `/authorize`, `/token`, `/revoke`, metadatos RFC 8414 y RFC 9728, PKCE, validación de audiencia (RFC 8707)
+- [ ] **CIMD** y lista explícita de `client_id` permitidos; **sin DCR**
+- [ ] Decidir la versión del SDK: el instalado (1.30.0) implementa el protocolo 2025-11-25; para la 2026-07-28 hay betas
+
+**3. Permisos por rol**
+
+- [ ] Tabla `MCP_ALCANCE_ROL` + pantalla de administración en el CRM
+- [ ] Acción `resolver_acceso` y `X-Acting-Person` obligatorio en `/api-mcp`
+- [ ] Filtrado de `tools/list` y chequeo en cada `tools/call`; re-chequeo del CRM como defensa en profundidad
+- [ ] Pantalla «mis conexiones» para revocar
+
+**4. Auditoría por persona**
+
+- [ ] Envío por lotes a `registrar_eventos_auditoria` y tabla `MCP_AUDITORIA` en el CRM
+- [ ] Sanitización de datos personales en el log (HMAC del DNI)
+- [ ] Definir la **retención** (propuesta: 12 meses en el CRM, 30 días de archivo local)
+
+**5. Dashboard — al final, en el CRM**
+
+- [ ] Uso por persona, tool y día; denegaciones; errores; latencia; volumen anómalo de resultados. **Sin Grafana**
+
+**Fuera de esta fase, y explícitamente separado:**
+
+- **Migrar `USUARIOS.contraseña` a hash con salt.** Sigue siendo necesario **como decisión de seguridad del CRM**, a estimar y aprobar por separado. **Ya no es prerrequisito de este proyecto**: el MCP nunca valida contraseñas. Ver [Riesgo 2](#-riesgo-2--contraseñas-almacenadas-con-cifrado-reversible)
+- **Operaciones de escritura.** Se posponen a después de que el uso multiusuario de lectura esté estable: tools de escritura con confirmación explícita vía MRTR, modo borrador para campañas, y ampliación de la auditoría al payload
 
 ### Fase 3 — Estado de comisiones y expansión (Semanas 13–18)
 
@@ -1154,9 +1320,13 @@ Esto significa que el sistema que gestiona datos personales de estudiantes, cobr
 
 `dbo.USUARIOS.contraseña` usa 3DES simétrico con clave derivada del nombre de usuario (`Negocio/usuariosAccesoDatos.vb:409,548`). Cualquiera con acceso de lectura a esa tabla y al ensamblado `modelo.dll` puede recuperar todas las contraseñas en texto plano.
 
-**Relación con este proyecto:** no lo causa ni lo agrava —la Fase 1 es máquina-a-máquina y no toca credenciales de usuario— pero **bloquea la Fase 2**. Federar un IdP contra ese esquema propagaría el defecto a un sistema nuevo.
+**Relación con este proyecto — corregida en la v2.6:** este proyecto **no lo causa, no lo agrava y ya no está bloqueado por él**.
 
-**Mitigación:** migración a hash con salt (bcrypt/PBKDF2/Argon2) como prerrequisito explícito de Fase 2, estimado y aprobado por separado.
+- La v2.1 a la v2.5 lo presentaban como **prerrequisito duro** de la identidad por usuario final. Ese razonamiento valía para el diseño de entonces: un **IdP federado validando credenciales contra la tabla `USUARIOS`**, que habría propagado el defecto a un segundo sistema expuesto a internet.
+- Con el diseño del 24/09/2026 **nadie fuera del CRM valida contraseñas**: la persona inicia sesión en una página del propio CRM y el MCP recibe solo un código de un solo uso. El defecto **no se copia ni crece**.
+- **Lo que no cambia:** guardar contraseñas de forma reversible sigue siendo un riesgo real —cualquiera con lectura sobre esa tabla y el ensamblado las recupera en texto plano— y hay que arreglarlo igual.
+
+**Mitigación:** migración a hash con salt (bcrypt/PBKDF2/Argon2) **como decisión de seguridad del CRM**, estimada y aprobada por separado, con su propia prioridad. No se agenda dentro de este proyecto ni se esconde en su estimación.
 
 ### 🟡 Riesgo 3 — Degradación del CRM de producción por consultas del agente
 
@@ -1213,8 +1383,10 @@ Este proyecto no debe sumar un solo puerto a esa máquina.
 |---|---|---|---|
 | **Las personas no lo usan** | Media | Alto | Arrancar con un área motivada. Resultados rápidos. No forzar adopción. |
 | **Exposición de PII** | Media | Alto | Dos de las cinco tools iniciales devuelven datos personales. Decidir explícitamente qué área ve qué, y proyectar solo los campos necesarios. |
-| **Conector equivocado a la persona equivocada** | Media | Medio | En Fase 1 los permisos son por área, no por persona. Publicación centralizada por el admin y revisión de asignaciones. |
-| **Enforcement de roles desparejo en el CRM** | Media | Medio | Relevante para Fase 2. El MCP Server aplica sus propias verificaciones y no asume que el rol implique permiso efectivo. |
+| **Conector equivocado a la persona equivocada** | Media | Medio | El piloto es de **una sola persona**. Para más de una, el permiso deja de ser por conector y pasa a ser por persona y rol (identidad + `MCP_ALCANCE_ROL`): esa es la regla de corte del plan. |
+| **Enforcement de roles desparejo en el CRM** | Media | Medio | Tres capas, ninguna confiada en las otras: el alcance del agente **no se hereda** de `ROLES_PRIVILEGIOS` sino que se declara en `MCP_ALCANCE_ROL`; el MCP lo chequea en cada `tools/call`; y el **CRM re-chequea en `/api-mcp` con `X-Acting-Person`**, así que un bug de permisos del MCP no alcanza para entregar datos. |
+| **Sysadmin sin límite a través del agente** | Media | Alto | `esSysadmin` saltea `puede_leer` en el CRM, y Dirección suele ser sysadmin. El alcance del agente **no se deriva** de los permisos del CRM: es una tabla explícita por rol (`MCP_ALCANCE_ROL`). |
+| **Extracción masiva de datos vía el modelo** | Media | Medio | Solo lectura, `limit` máximo de 20, límite de llamadas por persona y por minuto, y `cantidad_resultados` auditado por llamada. |
 | **Inyección de prompts** | Media | Medio | Servidor propio y self-hosted. Permisos acotados por área. Fase 1 sin escritura. |
 | **El spec de MCP vuelve a cambiar** | **Alta** | Bajo | Ya pasó tres veces en 14 meses. Se usa el SDK oficial, que absorbe la mayor parte. Política de deprecación de 12 meses mínimo. |
 | **Developer Mode de ChatGPT sigue en beta** | Media | Medio | El spike de Fase 0 lo valida. Claude es la alternativa sin beta. |
@@ -1267,13 +1439,15 @@ Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en 
    - **El tema más urgente de este documento, y el único que no es parte de este proyecto.** SO y motor de base de datos fuera de soporte simultáneamente
 
 3. **¿Se aprueba la migración del esquema de contraseñas?**
-   - Prerrequisito de la Fase 2. Decisión de seguridad independiente de este proyecto
+   - **Actualizado en la v2.6: ya no es prerrequisito de este proyecto.** Con el diseño del 24/09/2026 el MCP nunca valida contraseñas, así que la identidad por persona avanza sin esperarlo
+   - Sigue siendo una **decisión de seguridad del CRM**, con su propia prioridad y estimación. Que ya no bloquee este proyecto no lo vuelve menos necesario. Ver [Riesgo 2](#-riesgo-2--contraseñas-almacenadas-con-cifrado-reversible)
 
 4. ~~¿Qué área arranca como piloto?~~ — **Resuelto: Secretaría Académica**
 
-5. **¿Qué app de chat para el piloto?**
-   - Recomendación: Claude Pro × 5 ($107/mes total, menos que hoy)
+5. **¿Qué app de chat, Claude o ChatGPT?**
+   - Recomendación: Claude. Verificado el 24/09/2026: los conectores remotos propios están en Free, Pro, Max, Team y Enterprise; en Team/Enterprise solo los Owners los agregan y **cada persona se autentica individualmente**
    - Descartado: ChatGPT Plus — no soporta conectores custom
+   - **Criterio nuevo de la v2.6:** la **auditoría a nivel de conversación depende de la app**, no del MCP. El MCP registra llamadas a tools; qué se le preguntó al modelo solo queda registrado si la app lo provee (función de los planes Team / Enterprise). Si dirección quiere ese nivel de trazabilidad, la elección de app deja de ser solo preferencia
 
 6. ~~¿Qué acciones entran en la lista blanca de Secretaría Académica?~~ — **Resuelto: 4 acciones.** Ver [Área piloto](#secretaría-académica--⭐-área-piloto)
 
@@ -1297,6 +1471,24 @@ Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en 
 
 11. **¿Cómo se expone el endpoint MCP por HTTPS en el servidor existente?**
    - Abierto desde la decisión del 23/09/2026. Hoy nginx escucha en 8443 **sin TLS** y el firewall entrante permite 80/443. Es tarea de Fase 1 y no tiene solución elegida
+   - **Agregado en la v2.6:** ya no es solo una tarea de exposición. **Sin transporte remoto por HTTPS no hay identidad por persona**, porque el flujo OAuth 2.1 necesita `/authorize`, `/token` y sus metadatos alcanzables desde el navegador
+
+### Abiertas desde la v2.6 (diseño de identidad, permisos y auditoría)
+
+12. **¿Quién define la matriz rol → tools, y con qué contenido?**
+   - `MCP_ALCANCE_ROL` es una decisión de negocio, no técnica: dice qué puede hacer cada rol **a través del agente**, que no es lo mismo que lo que puede hacer en el CRM
+   - El borrador de `DISENO-API-MCP.md` §3.4 usa Secretaría Académica y Dirección como ejemplo. **La matriz real la tiene que validar Max**
+
+13. **Si una persona tiene varios roles, ¿unión o elección?**
+   - Propuesta: **unión** de las tools de todos sus roles, por simplicidad de uso
+   - Alternativa: exigir que elija un rol al conectarse. Más preciso para auditaría, más fricción para la persona
+
+14. **¿Cuánto se retiene la auditoría?**
+   - Propuesta: **12 meses en el CRM** (`MCP_AUDITORIA`) y **30 días** de archivo local en `G:`
+   - Condicionado por el disco: C: está al 89,7 %; el archivo local vive en G: con rotación y tope de tamaño
+
+15. **¿Se aprueba el endpoint `/api-mcp` y su orden de construcción?**
+   - Implica desarrollo en el CRM (handler, `/mcp-autorizar`, dos tablas nuevas y una pantalla). `DISENO-API-MCP.md` §8 tiene las siete preguntas abiertas que hay que contestar del lado del CRM antes de empezar
 
 ---
 
@@ -1317,6 +1509,15 @@ Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en 
 | Deuda de auth y aislamiento por organización | `documentacion/convenciones/api-clases-comision-deuda-auth.md` |
 | Cliente y sincronización de Moodle | `Negocio/MoodleApiClient.vb`, `ConIgCba/auxiliar/MoodleSyncService.vb` |
 | Change propuesto de salud de comisiones | `openspec/changes/salud-comisiones-crm/proposal.md` |
+| Precedente de endpoint dedicado | `/api-presencia` (CRM, 21/09/2026) |
+| Corrección del contrato de errores de `/api` | CRM, commit `e9746a91` (21/09/2026) — `existingResponse="Auto"` |
+
+### Documentos complementarios de este proyecto
+
+| Tema | Documento |
+|---|---|
+| Endpoint `/api-mcp`, identidad, permisos y auditoría | `DISENO-API-MCP.md` |
+| Contrato de cada tool hacia el modelo | `DISENO-TOOLS-MCP.md` |
 
 ### Documentación externa
 
@@ -1326,12 +1527,18 @@ Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en 
 | Cambios respecto de 2025-11-25 | `modelcontextprotocol.io/specification/2026-07-28/changelog` |
 | Autorización MCP | `modelcontextprotocol.io/specification/2026-07-28/basic/authorization` |
 | SDK oficial de TypeScript | `ts.sdk.modelcontextprotocol.io` |
+| Registro de clientes: preregistro, CIMD, DCR | `modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration` |
 | Developer Mode y conectores en ChatGPT | Centro de ayuda de OpenAI, art. 12584461 |
+| Conectores remotos propios en Claude (planes, Owners, autenticación individual) | Centro de ayuda de Claude, *Get started with custom connectors using remote MCP* |
+| Autenticación de conectores en Claude (OAuth, DCR, CIMD) | `claude.com/docs/connectors/building/authentication` |
+| Soporte de MCP en Codex (Streamable HTTP, OAuth, CIMD) | Documentación de MCP de Codex |
+| SDKs beta para la spec 2026-07-28 | Blog de MCP, *Beta SDKs for the 2026-07-28 MCP Spec Release Candidate* |
 | Fin de soporte de Windows Server 2012 | `learn.microsoft.com/lifecycle` |
 
 ---
 
 *Documento generado como parte del análisis de viabilidad del proyecto IA-ORGANIZACIONAL.*
-*Versión 2.5 — revisada contra el estado del ecosistema MCP a septiembre de 2026, contra el código de Saberes-Terra y contra el servidor de producción (última verificación por SSH: 23/09/2026).*
+*Versión 2.6 — revisada contra el estado del ecosistema MCP a septiembre de 2026, contra el código de Saberes-Terra y contra el servidor de producción (última verificación por SSH: 23/09/2026; auditoría de contrato de la API y verificaciones de conectores y SDK: 24/09/2026).*
+*Diseño de endpoint, identidad, permisos y auditoría: `DISENO-API-MCP.md`. Contrato de las tools: `DISENO-TOOLS-MCP.md`.*
 *Código y documentación del CRM citados contra `origin/main` @ `61a2ace3`.*
 *Para consultas técnicas o ampliaciones, contactar al equipo de desarrollo.*
