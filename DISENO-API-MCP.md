@@ -1,9 +1,11 @@
 # Diseño — `/api-mcp`, identidad, permisos y auditoría
 
-**Versión:** 0.3 (borrador)
+**Versión:** 0.4
 **Fecha:** 24/09/2026
 **Estado:** contrastado con el CRM el 24/09/2026 (sesión green-cloud, `documentacion/api/contraste-diseno-api-mcp.md` en su worktree). Respuestas en §8.1; **decisiones abiertas de Max** en §8.2
 
+> **Cambios de la v0.4 (24/09/2026).** El paso 1 está **en producción** (§4.4, con el contrato medido). Max decidió que el agente ve **las cuatro organizaciones** del catálogo (D2).
+>
 > **Cambios de la v0.3 (24/09/2026).** El alcance del agente por rol **reutiliza la tabla `PRIVILEGIOS` del CRM** en vez de una tabla nueva: privilegios sueltos `MCP · …` asignados en `ROLES_PRIVILEGIOS` con la pantalla de privilegios que ya existe. Verificado en el código: `Evaluar_Privilegio` no tiene atajo para sysadmin. Max decidió D1, D2 y D3 (§8.2).
 >
 > **Cambios de la v0.2 (24/09/2026).** El contraste con el CRM corrigió cuatro supuestos: `id_rol` es un catálogo compartido con los roles de comisión (1 = Estudiante), la vigencia se define por **estado** y no por fecha, no existen reglas de datos por organización ligadas a la persona, y `/mcp-autorizar` cae bajo un defecto de postbacks ya conocido del CRM. También sumó un requisito de baja (`resolver_acceso` debe revisar `activado` y `borrada`) y tres decisiones para Max.
@@ -293,7 +295,7 @@ Error:
 
 | Acción | Para la tool | Entrada | Notas |
 |---|---|---|---|
-| `cursos_disponibles` | `listar_cursos` | — | Sin `UPPER` forzado |
+| `cursos_disponibles` | `listar_cursos` | — | Sin `UPPER` forzado. Cada curso trae su `organizacion` (pedido el 24/09: sin ella hay nombres repetidos imposibles de distinguir) |
 | `buscar_comisiones` | `buscar_comision` | `texto?`, `id_curso?`, `modalidad?`, `estados?`, `limit` (máx. 20), `cursor?` | Filtra en SQL, no en memoria. **La vigencia se define por estado, no por fecha**: sin `estados`, aplica la regla del catálogo (estado 2 + publicada). No hay corte por año calendario, que era una particularidad del SP de Prometheo. `COMISIONES` no tiene ventana de inscripción y `fecha_finalizacion` es fin de cursado y admite nulos, así que no sirve como criterio |
 | `comision` | `detalle_comision` | `id_comision`, `incluir_aranceles?` | `404` si no existe. Incluye `estado` y `disponible` (bool, regla del catálogo) para que el MCP sepa si la comisión está en el mismo universo que la búsqueda. Estados: 1 nueva, 2 inscripciones, 3 cursando, 4 finalizada, 5 cancelada, 6 completa, 7 no listada |
 | `persona_en_comision` | `estado_de_persona` | — | **Fuera de este borrador.** Bloqueada hasta la decisión de dirección sobre PII. Se diseña desde cero con el control de acceso correcto (hoy `recuperar_persona_comision` entrega PII con DNI + id sin el control por teléfono) |
@@ -340,6 +342,32 @@ Con `es_virtual` explícito, `localidad: null` significa "no aplica" en una comi
 **Tipos en la base** (confirmado por el CRM): los montos son `Money`, `duracion_meses` es `Int`, las fechas son `Date`. Todo el formateo (`"$ 29.000 (*...)"`, `"S/D"`, `UPPER`) lo arma el SP de Prometheo: `/api-mcp` **no convierte nada, solo deja de formatear**. `nota_promocion` sale de `motivo_bonificacion_*` (`NVarChar(200)`), texto cargado en el backoffice.
 
 > ⚠️ **`COMISIONES` tiene flags de publicación de montos** (`mostrar_valor_inscripcion`, `mostrar_valor_cuota`, …), y en autogestión uno depende del estado administrativo de la persona (`CursosAccesoDatos.vb:7292-7295`). `/api` hoy los ignora (deuda heredada). Qué hace `/api-mcp` con ellos es la **decisión abierta D1** (§8.2).
+
+---
+
+### 4.4 En producción: el paso 1, medido (24/09/2026)
+
+Deployado por la sesión green-cloud (CRM `main` = `bb5f6158`, SHA desplegado `4a4b1c36`). Contrato vigente: `documentacion/api/api-mcp-endpoint.md` en el repo del CRM. Cliente de servicio propio: **15 `mcp-api-mcp`**, separado del 14 que usa `/api`.
+
+**Medido contra producción con el token del cliente 15:**
+
+| Caso | Resultado |
+|---|---|
+| Sin token / token falso | `401` `invalid_service_token` |
+| `GET` | `405` `method_not_allowed` |
+| Token del cliente 14 | `403` `action_not_allowed`: los clientes están aislados |
+| `comision` 2672 | `200` con `null` en vez de `"S/D"`, fechas ISO, números, `es_virtual`, `estado`, `disponible` |
+| `comision` 2672 con aranceles | 6 montos numéricos y `nota_promocion`. **La certificación no sale**: la comisión la marca para no mostrarse (D1). `/api` la mostraba |
+| `comision` inexistente | `404` `not_found` |
+| `buscar_comisiones` `"produccion"` (sin tilde) | Encuentra `PRODUCCIÓN…`: la búsqueda ignora tildes y mayúsculas (`Modern_Spanish_CI_AI`, conserva la ñ) |
+| `limit` 2 | `next_cursor` + `has_more` |
+| `limit` 50 / acción desconocida | `400` `invalid_params` |
+
+**Desvíos aceptados respecto de §4.3:** `charla_informativa` es `{fecha, hora}` sin enlace (texto libre fuera de la allowlist); `403` usa `action_not_allowed` mientras no haya persona; acción desconocida es `400`; `cursos_disponibles` no pagina pero devuelve `page`; `modalidad` se filtra por nombre; un monto oculto por D1 **no aparece** (no viaja como `null`); `nota_promocion` solo si la inscripción promocionada es visible; `moneda` fija `"ARS"`.
+
+**Universo de datos:** la regla del catálogo trae **28 cursos y 28 comisiones de cuatro organizaciones**: 1 Fundación Educativa Saberes, 2 Terra - Instituto de Formación Agropecuaria, 3 Escuela de Recibidores de Granos de Paraguay y 4 Escuela de Recibidores de Granos de Uruguay. `/api` mostraba solo las dos primeras (14 cursos), porque el SP de Prometheo tiene `id_organizacion IN (1,2)` fijo.
+
+**La casing de origen es despareja** ("Administración Agropecuaria" junto a "GESTIÓN CONTABLE APLICADA AL AGRO"). `/api-mcp` entrega el dato tal cual; normalizar para mostrarlo es presentación y queda en el MCP.
 
 ---
 
@@ -479,7 +507,7 @@ Decididas por Max el 24/09/2026, siguiendo la recomendación en los tres casos.
 | # | Decisión | Opciones | **Decidido** |
 |---|---|---|---|
 | **D1** | **Flags de publicación de montos.** ¿El privilegio de aranceles alcanza para ver un monto que el negocio marcó como "no mostrar"? | (a) El permiso alcanza: el agente es una herramienta interna. (b) Se respetan siempre los `mostrar_valor_*` | ✅ **(b)**: se respetan los `mostrar_valor_*` de cada comisión. Si el negocio decidió no mostrar un valor, el agente tampoco |
-| **D2** | **Alcance por organización.** Hoy nadie del staff está acotado a una organización | (a) Sin acotar, como hoy en el CRM. (b) Modelar organización por persona o rol | ✅ **(a)**: sin acotar, como hoy en el CRM. (b) solo si aparece un caso real |
+| **D2** | **Alcance por organización.** Hoy nadie del staff está acotado a una organización | (a) Sin acotar, como hoy en el CRM. (b) Modelar organización por persona o rol | ✅ **(a)**: sin acotar, como hoy en el CRM. (b) solo si aparece un caso real. **Alcance del agente: las cuatro organizaciones del catálogo** (Max, 24/09); cada curso y comisión dice de qué organización es |
 | **D3** | **Unificar "comisión disponible"** en el CRM (4 predicados) | (a) Ahora, dentro del paso 1 (4-5 sesiones). (b) Aparte, después | ✅ **(b)**: aparte, después. `/api-mcp` usa la regla del catálogo |
 
 ---
