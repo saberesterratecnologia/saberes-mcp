@@ -1,8 +1,10 @@
 # Diseño — `/api-mcp`, identidad, permisos y auditoría
 
-**Versión:** 0.1 (borrador)
+**Versión:** 0.2 (borrador)
 **Fecha:** 24/09/2026
-**Estado:** propuesta del lado MCP, **pendiente de contrastar con el CRM** (sección 8)
+**Estado:** contrastado con el CRM el 24/09/2026 (sesión green-cloud, `documentacion/api/contraste-diseno-api-mcp.md` en su worktree). Respuestas en §8.1; **decisiones abiertas de Max** en §8.2
+
+> **Cambios de la v0.2 (24/09/2026).** El contraste con el CRM corrigió cuatro supuestos: `id_rol` es un catálogo compartido con los roles de comisión (1 = Estudiante), la vigencia se define por **estado** y no por fecha, no existen reglas de datos por organización ligadas a la persona, y `/mcp-autorizar` cae bajo un defecto de postbacks ya conocido del CRM. También sumó un requisito de baja (`resolver_acceso` debe revisar `activado` y `borrada`) y tres decisiones para Max.
 **Documento padre:** `PROPUESTA-AGENTES-IA.md` v2.6
 **Documento hermano:** `DISENO-TOOLS-MCP.md` v1.3 (contrato de cada tool hacia el modelo)
 **Revisión de protocolo MCP:** 2026-07-28
@@ -87,7 +89,7 @@ Roles de ejemplo en este borrador: **Secretaría Académica** y **Dirección**. 
 
 ### 2.3 Por qué el diseño elegido no compromete al CRM
 
-El problema de seguridad del CRM es **cómo guarda** las contraseñas, no cómo se inicia sesión. En este diseño el CRM sigue siendo el único que valida la contraseña, en su propia página, con su propio mecanismo. El defecto no se copia a ningún lado ni crece.
+El problema de seguridad del CRM es **cómo guarda** las contraseñas: hoy **no están hasheadas, están cifradas de forma reversible** (3DES, con clave derivada del nombre de usuario). No es un problema de cómo se inicia sesión. En este diseño el CRM sigue siendo el único que valida la contraseña, en su propia página, con su propio mecanismo. El defecto no se copia a ningún lado ni crece.
 
 > Consecuencia: la migración de contraseñas a hash con salt **sigue siendo necesaria como tema de seguridad del CRM**, pero **deja de ser prerrequisito** de la identidad por persona del MCP.
 
@@ -119,6 +121,7 @@ El almacén de tokens es del MCP (tabla propia en `G:`, hashes, nunca el token e
 
 - **Revocación explícita**: la persona o un administrador revoca desde el CRM ("mis conexiones"); el CRM lo informa en `resolver_acceso` y el MCP invalida los tokens de esa concesión.
 - **Baja de la persona en el CRM**: el MCP consulta `resolver_acceso` en cada llamada, con caché de **hasta 5 minutos**. Una persona desactivada pierde el acceso en ese plazo, sin que nadie se acuerde del MCP.
+  - ⚠️ **Requisito del lado CRM:** `resolver_acceso` tiene que consultar **explícitamente** `USUARIOS.activado` y `PERSONAS.borrada`. Las funciones de sesión del CRM (`recuperar_usuario_logueado_actual`) **no los revalidan**: solo se chequean al iniciar sesión. Si `resolver_acceso` reutilizara esas funciones, una persona dada de baja seguiría entrando.
 - **Revocación en el MCP** (`/revoke`): la usa la app de chat al desconectar el conector.
 
 ### 2.7 El "en nombre de quién" hacia el CRM
@@ -128,7 +131,9 @@ El MCP llama a `/api-mcp` con **dos datos**:
 - `X-Api-Token`: el token de servicio del cliente `mcp-secretaria-academica` (hoy id 14). Prueba que **quien llama es el MCP**.
 - `X-Acting-Person`: el `id_persona` que el MCP resolvió en el paso 7. Dice **en nombre de quién**.
 
-El CRM acepta `X-Acting-Person` **solo** de un cliente marcado como habilitado para actuar en nombre de personas. Ningún otro cliente de `SERVICIOS_API` puede enviarlo. El token de la persona **nunca** se reenvía al CRM: la spec prohíbe el *token passthrough*, y además el CRM no sabría validarlo.
+El CRM acepta `X-Acting-Person` **solo** de un cliente marcado como habilitado para actuar en nombre de personas. Ningún otro cliente de `SERVICIOS_API` puede enviarlo.
+
+> ⚠️ **La marca tiene tres puntas en el CRM**, y olvidar una falla en silencio: la columna en la tabla `SERVICIOS_API`, el `SELECT` con columnas explícitas que lee los clientes (`Negocio/ServiciosApiAccesoDatos.vb:297-306`, no es `SELECT *`) y el ABM de sysadmin. `SERVICIOS_API` es la tabla; `SERVICIO_API` es la clase VB que mapea una fila. El token de la persona **nunca** se reenvía al CRM: la spec prohíbe el *token passthrough*, y además el CRM no sabría validarlo.
 
 ### 2.8 Qué apps de chat pueden conectarse
 
@@ -176,9 +181,10 @@ Por eso el alcance del agente **no se deriva** de los permisos del CRM: es una t
 ### 3.3 Reglas
 
 1. **Negado por defecto.** Una persona sin ningún rol mapeado en la tabla de alcance no ve ninguna tool.
-2. **Varios roles:** la persona recibe la **unión** de las tools de sus roles. *(A validar con Max: la alternativa es exigir que elija un rol al conectarse.)*
+2. **Varios roles:** la persona recibe la **unión** de las tools de sus roles. Coincide con el CRM: `evaluar_acceso` mira cualquier rol de la persona, no el activo. *(Nota: el CRM tiene un `id_rol_usuario_actual` que hoy no usa para autorizar; si algún día lo empieza a usar, este punto queda desalineado.)*
 3. **El filtrado de `tools/list` no es seguridad**, es experiencia de uso. Cada `tools/call` se vuelve a chequear contra el acceso efectivo.
-4. **Defensa en profundidad:** el CRM vuelve a chequear en `/api-mcp` que la acción sea coherente con la persona (`X-Acting-Person`). Si el MCP tuviera un bug de permisos, el CRM igual no entrega datos fuera de las reglas de la persona.
+4. **Defensa en profundidad:** el CRM vuelve a chequear en `/api-mcp` que la acción sea coherente con la persona (`X-Acting-Person`): que esté activa y que su rol tenga el permiso en `MCP_ALCANCE_ROL`. Si el MCP tuviera un bug de permisos, el CRM igual no ejecuta la acción.
+   - **Límite, confirmado por el CRM:** **no existen reglas de datos por organización ligadas a la persona.** `PERSONAS_ROLES` no tiene organización; en el sitio la organización sale del dominio o de `?org=`. Sysadmin y secretaría ven todas las organizaciones. Así que el re-chequeo es de **acción**, no de **filas**. Si se quiere acotar a una persona a una organización, hay que modelarlo: es la decisión abierta D2 (§8.2).
 5. **Los permisos los decide el servidor, nunca el modelo.** Ningún parámetro de una tool puede ampliar el alcance.
 
 ### 3.4 Matriz de ejemplo (a validar por Max)
@@ -197,7 +203,7 @@ Por eso el alcance del agente **no se deriva** de los permisos del CRM: es una t
 
 ```
 MCP_ALCANCE_ROL
-  id_rol          → rol del CRM
+  id_rol          → rol de sistema del CRM (solo roles de la lista habilitada, ver abajo)
   permiso         → 'listar_cursos' | 'buscar_comision' | 'detalle_comision'
                     | 'detalle_comision.aranceles' | 'estado_de_persona'
   activo          → bit
@@ -205,6 +211,13 @@ MCP_ALCANCE_ROL
 ```
 
 Cada cambio de esta tabla es, en sí mismo, un evento auditable del CRM.
+
+> 🔴 **`id_rol` no es solo "rol de área".** `ROLES` es un único catálogo que sirve a la vez para el rol de sistema (`PERSONAS_ROLES`) y para el rol dentro de una comisión (`COMISIONES_PERSONAS`): **1 = Estudiante, 2 = Profesor**, y los mismos números gobiernan `VISTAS_ROLES`. Una fila con `id_rol = 1` **le daría el permiso a todos los estudiantes**, el universo más grande del sistema.
+>
+> **Reglas que esto impone:**
+> - Una **lista blanca de roles habilitados** para el agente (Secretaría, Dirección, …). Estudiante y Profesor quedan fuera por construcción: el ABM no los ofrece y `/api-mcp` los rechaza aunque alguien inserte la fila a mano.
+> - La pantalla de administración muestra el **nombre** del rol, nunca el número.
+> - `esSysAdmin` es el rol 4 (confirmado): §3.2 se sostiene.
 
 ---
 
@@ -218,7 +231,9 @@ Cada cambio de esta tabla es, en sí mismo, un evento auditable del CRM.
 - **Datos, no presentación:** `null` en vez de `"S/D"`, sin `UPPER`, fechas ISO 8601, números como números, montos como número (el `"GRATIS"` es un `0`), nombres de campo en `snake_case` sin tildes.
 - **Solo los campos que usan las tools.** Lo que el MCP no proyecta no sale de la base (`bot_contexto_*`, enlace de WhatsApp, instituciones).
 - **Paginación** en toda colección.
-- **Mismas reglas de negocio que el resto del CRM.** "Comisión disponible" se define una sola vez (vista o función SQL) y la usan `/api` y `/api-mcp`. Independiente en el contrato, no en las reglas.
+- **Mismas reglas de negocio que el resto del CRM.** Independiente en el contrato, no en las reglas. `/api-mcp` usa **la regla del catálogo del sitio**: estado 2 (inscripciones) + publicada + organización + país (`cursosAccesoDatos.vb:3815-3832`).
+  - Hoy conviven **cuatro predicados distintos** de "comisión disponible" en el CRM. Unificarlos es correcto, pero toca el sitio público y la inscripción: **no es prerrequisito** de `/api-mcp` y va como trabajo aparte (decisión D3).
+- **Handler de token, sin sesión.** Solo `IHttpHandler`: **no** `IRequiresSessionState` (serializa las requests de una misma sesión, y fue la razón del deploy del 21/09 que separó `/api-presencia` de `/api`). Tampoco se reutiliza la clase `ApiRequest` (35 propiedades `As Object`). El formato `{data}` / `{error}` requiere un `WriteJson` propio.
 
 ### 4.2 Forma de las respuestas
 
@@ -259,8 +274,8 @@ Error:
 | Acción | Para la tool | Entrada | Notas |
 |---|---|---|---|
 | `cursos_disponibles` | `listar_cursos` | — | Sin `UPPER` forzado |
-| `buscar_comisiones` | `buscar_comision` | `texto?`, `id_curso?`, `modalidad?`, `estado?`, `limit` (máx. 20), `cursor?` | Filtra en SQL, no en memoria. **"Vigente" se define por fecha de fin**, no por año calendario (evita que el 1/1 desaparezcan comisiones en curso) |
-| `comision` | `detalle_comision` | `id_comision`, `incluir_aranceles?` | `404` si no existe. Incluye `disponible` (bool) para que el MCP sepa si la comisión está en el mismo universo que la búsqueda |
+| `buscar_comisiones` | `buscar_comision` | `texto?`, `id_curso?`, `modalidad?`, `estados?`, `limit` (máx. 20), `cursor?` | Filtra en SQL, no en memoria. **La vigencia se define por estado, no por fecha**: sin `estados`, aplica la regla del catálogo (estado 2 + publicada). No hay corte por año calendario, que era una particularidad del SP de Prometheo. `COMISIONES` no tiene ventana de inscripción y `fecha_finalizacion` es fin de cursado y admite nulos, así que no sirve como criterio |
+| `comision` | `detalle_comision` | `id_comision`, `incluir_aranceles?` | `404` si no existe. Incluye `estado` y `disponible` (bool, regla del catálogo) para que el MCP sepa si la comisión está en el mismo universo que la búsqueda. Estados: 1 nueva, 2 inscripciones, 3 cursando, 4 finalizada, 5 cancelada, 6 completa, 7 no listada |
 | `persona_en_comision` | `estado_de_persona` | — | **Fuera de este borrador.** Bloqueada hasta la decisión de dirección sobre PII. Se diseña desde cero con el control de acceso correcto (hoy `recuperar_persona_comision` entrega PII con DNI + id sin el control por teléfono) |
 
 **Ejemplo — `comision`:**
@@ -301,6 +316,10 @@ Error:
 ```
 
 Con `es_virtual` explícito, `localidad: null` significa "no aplica" en una comisión virtual y "falta el dato" en una presencial: la ambigüedad del `"S/D"` desaparece. `aranceles` solo viene si se pide **y** si la persona tiene el permiso `detalle_comision.aranceles`.
+
+**Tipos en la base** (confirmado por el CRM): los montos son `Money`, `duracion_meses` es `Int`, las fechas son `Date`. Todo el formateo (`"$ 29.000 (*...)"`, `"S/D"`, `UPPER`) lo arma el SP de Prometheo: `/api-mcp` **no convierte nada, solo deja de formatear**. `nota_promocion` sale de `motivo_bonificacion_*` (`NVarChar(200)`), texto cargado en el backoffice.
+
+> ⚠️ **`COMISIONES` tiene flags de publicación de montos** (`mostrar_valor_inscripcion`, `mostrar_valor_cuota`, …), y en autogestión uno depende del estado administrativo de la persona (`CursosAccesoDatos.vb:7292-7295`). `/api` hoy los ignora (deuda heredada). Qué hace `/api-mcp` con ellos es la **decisión abierta D1** (§8.2).
 
 ---
 
@@ -354,12 +373,29 @@ Sale de `MCP_AUDITORIA` + nombres y roles del CRM: uso por persona, tool y día;
 | **Suplantación de `X-Acting-Person`** | Solo un cliente de servicio habilitado puede enviarlo; su token vive únicamente en el host del MCP |
 | **Sysadmin con acceso total por el agente** | Alcance explícito por rol, no derivado de los permisos del CRM (§3.2) |
 | **Extracción masiva vía el modelo** | Solo lectura; `limit` máximo de 20; límite de llamadas por persona y por minuto; `cantidad_resultados` auditado |
-| **Prompt injection desde datos del CRM** | Los campos de texto libre (`bot_contexto_*`) no salen de la base; el agente no tiene herramientas de escritura |
+| **Prompt injection desde datos del CRM** | **Allowlist explícita** de campos de texto libre que sí salen: `codigo`, `horarios`, `nota_promocion`, `pagina_web`. Todo otro texto libre (`bot_contexto_*`, `observaciones`, enlace de WhatsApp) no sale de la base. Tope de largo por campo. El agente no tiene herramientas de escritura, así que una instrucción inyectada no puede causar cambios |
 | **Baja de una persona que sigue usando el agente** | `resolver_acceso` en cada llamada con caché de hasta 5 min |
 | **App de chat no autorizada** | Lista explícita de `client_id`; sin DCR |
 | **Bug de permisos en el MCP** | El CRM re-chequea en `/api-mcp` con `X-Acting-Person` |
 | **Se pierden eventos de auditoría** | Archivo local append-only antes de enviar al CRM |
 | **Superficie nueva en un servidor sin parches** | Riesgo ya aceptado en la v2.5 de la propuesta; `/mcp-autorizar` y `/api-mcp` son la superficie nueva del CRM y deben pasar revisión propia |
+
+---
+
+### 6.1 `/mcp-autorizar` y el defecto de postbacks del CRM
+
+Es **el punto de seguridad más delicado del diseño**. El botón "Autorizo" de `/mcp-autorizar` es un postback, y el CRM tiene un defecto transversal ya conocido: los controles de acceso se hacen solo en `Page_Load`, el redirect no termina la request y los handlers corren igual (87 code-behinds, unos 1160 handlers, solo 11 re-chequean). `security_check()` no lo compensa: solo filtra IPs.
+
+Si `/mcp-autorizar` siguiera el patrón mayoritario, **una persona autenticada podría forjar un consentimiento**, y ese consentimiento emite el código que se canjea por identidad.
+
+**Reglas obligatorias para esa página:**
+
+1. El handler del botón **vuelve a validar la sesión adentro del handler**, no solo en `Page_Load`. Moldes correctos del repo: `modulos/informes/mostrar_informe.aspx.vb:340-344` y `metricas_lead_magnet.aspx.vb:30-53`.
+2. El `id_persona` se toma de la sesión **dentro del handler**. Nunca de un campo oculto, del ViewState ni de la query string.
+3. El `state` y el `client_id` que vienen del MCP se validan contra lo que el MCP registró, y el código emitido queda atado a ese `state`.
+4. **Revisión de seguridad dedicada** antes de deployar el paso 2.
+
+> Este defecto sale de un análisis estático del CRM: nadie lo explotó. Pero afecta exactamente la página que emite identidad, así que se trata como requisito, no como mejora.
 
 ---
 
@@ -370,6 +406,7 @@ Sale de `MCP_AUDITORIA` + nombres y roles del CRM: uso por persona, tool y día;
 | Handler `/api-mcp` con el contrato de §4 | Servidor de autorización: `/authorize`, `/token`, `/revoke`, metadatos RFC 8414 |
 | Página `/mcp-autorizar`: sesión del CRM + consentimiento + código de un uso | Metadatos RFC 9728 y 401 con `WWW-Authenticate` en `/mcp` |
 | Tabla de códigos de un uso y de concesiones | Almacén de tokens (hashes) |
+| **`/mcp-autorizar` con el re-chequeo dentro del handler** (§6.1) | |
 | Tabla `MCP_ALCANCE_ROL` + su pantalla de administración | Resolución de acceso efectivo, filtrado de `tools/list`, chequeo en cada `tools/call` |
 | Pantalla "mis conexiones" (revocar) | Envío de `X-Acting-Person` a `/api-mcp` |
 | Tabla `MCP_AUDITORIA` | Archivo de auditoría local + envío por lotes |
@@ -386,17 +423,42 @@ Sale de `MCP_AUDITORIA` + nombres y roles del CRM: uso por persona, tool y día;
 
 > Los pasos 2 a 4 van juntos a producción: **no se habilita a más de una persona hasta que identidad, permisos y auditoría estén los tres**.
 
+**Estimación del CRM** (unidades de trabajo, no horas):
+
+| Paso | Estimación | Notas |
+|---|---|---|
+| 1. `/api-mcp` con las 3 lecturas | **2-3 sesiones** | Sin migración ni ventana de caída. Sube a 4-5 si se decide unificar "comisión disponible" con el sitio. **El tramo más barato y el de más valor** |
+| 2. `/mcp-autorizar` + canje + tablas | **3-4 sesiones** | Migración aditiva. **Con revisión de seguridad dedicada**, porque emite identidad y lo toca el defecto de postbacks (§6.1) |
+
+Recomendación del CRM, que coincide con este orden: **el paso 1 completo y andando antes de empezar el 2**.
+
+**Deploy del lado CRM:** tablas `MCP_*` y columnas nuevas son **aditivas** y van antes del upload, sin ventana de caída. Orden estricto: aspx → Web.config → PDB → modelo → Negocio → Saberes. Las páginas nuevas se registran en `Aplicacion.vbproj` o no se publican.
+
 ---
 
-## 8. Preguntas para el CRM
+## 8. Contraste con el CRM (24/09/2026)
 
-1. **Roles:** ¿en qué tabla vive la relación persona ↔ rol? ¿Una persona puede tener varios roles? ¿Qué define que una persona esté "activa"?
-2. **Sesión:** ¿`/mcp-autorizar` puede ser una página WebForms más detrás de la autenticación de formularios actual, reutilizando la sesión sin cambios?
-3. **`/api-presencia`:** ¿su estructura sirve de molde para `/api-mcp`? ¿Tiene lista de acciones permitidas propia?
-4. **"Comisión disponible":** ¿cuál es la regla correcta? Hoy el listado corta por año calendario y el detalle no filtra. ¿Qué define "vigente"?
-5. **Reglas de datos por persona:** para las acciones de §4.3, ¿hay datos que una persona de un rol no debería ver aunque tenga la tool? (por ejemplo, comisiones de otra organización).
-6. **Montos:** ¿los siete valores se guardan como números en la base y el formato `"$ 29.000 (*...)"` lo arma el SP? ¿De dónde sale la anotación de la promoción?
-7. **`EXCEPCIONES` y deploy:** ¿alguna restricción del protocolo de deploy del CRM para agregar tablas y un handler nuevo?
+Respondido por la sesión green-cloud, solo lectura, a partir del código del CRM. **Nada se midió contra producción** y los mapeos reales de roles en producción no están verificados.
+
+### 8.1 Respuestas
+
+| # | Pregunta | Respuesta | Dónde impacta |
+|---|---|---|---|
+| 1 | Roles y "activa" | Persona ↔ rol en `PERSONAS_ROLES`; puede tener varios. **`ROLES` es un catálogo compartido con los roles de comisión** (1 = Estudiante, 2 = Profesor). "Activa" = `USUARIOS.activado` y no `PERSONAS.borrada`, **que la sesión no revalida** | §2.6, §3.5 |
+| 2 | Sesión en `/mcp-autorizar` | **Sí.** La autenticación de formularios cubre todo el sitio: `validar_session_actual(True)` + `recuperar_usuario_logueado_actual().id_persona`. Con el defecto de postbacks en cuenta | §6.1 |
+| 3 | `/api-presencia` como molde | **Sí, con restas:** sin `IRequiresSessionState`, sin la clase `ApiRequest`, con un `WriteJson` propio | §4.1 |
+| 4 | "Comisión disponible" | **Por estado, no por fecha.** Catálogo = estado 2 + publicada + org + país. Conviven 4 predicados; unificarlos va aparte | §4.1, §4.3, D3 |
+| 5 | Reglas de datos por persona | **No existen por organización.** Sysadmin y secretaría ven todas | §3.3, D2 |
+| 6 | Montos | `Money`, `Int`, `Date` en la base; el formato lo arma el SP. La nota sale de `motivo_bonificacion_*` | §4.3, D1 |
+| 7 | Deploy | Nada bloquea: todo es aditivo. Registrar páginas en `Aplicacion.vbproj`. El `DEPLOY.lock` es local a cada máquina, no coordina entre personas | §7 |
+
+### 8.2 Decisiones abiertas de Max
+
+| # | Decisión | Opciones | Recomendación |
+|---|---|---|---|
+| **D1** | **Flags de publicación de montos.** ¿El permiso `detalle_comision.aranceles` alcanza para ver un monto que el negocio marcó como "no mostrar"? | (a) El permiso alcanza: el agente es una herramienta interna. (b) Se respetan siempre los `mostrar_valor_*` | **(b)**. Si el negocio decidió no mostrar un valor, el agente no debería contradecirlo sin que nadie lo haya decidido explícitamente. Se puede revisar después |
+| **D2** | **Alcance por organización.** Hoy nadie del staff está acotado a una organización | (a) Sin acotar, como hoy en el CRM. (b) Modelar organización por persona o rol | **(a) para el piloto**, porque replica lo que el CRM ya permite. (b) solo si aparece un caso real |
+| **D3** | **Unificar "comisión disponible"** en el CRM (4 predicados) | (a) Ahora, dentro del paso 1 (4-5 sesiones). (b) Aparte, después | **(b)**. `/api-mcp` usa la regla del catálogo y no queda bloqueado |
 
 ---
 

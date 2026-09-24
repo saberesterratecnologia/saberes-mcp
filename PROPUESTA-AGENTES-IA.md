@@ -291,7 +291,7 @@ Del lado del agente, la capa que agregamos es una sola: el MCP Server. Del lado 
 
 **Qué resuelve.** Desaparece toda la traducción *accidental* que hoy carga el MCP Server —convertir `"S/D"` en campo ausente, deshacer el `UPPER`, interpretar montos formateados como texto, desambiguar `200 + data: null`— porque **el dato sale bien de origen**: `null` en vez de `"S/D"`, fechas ISO 8601, números como números, `404` cuando algo no existe, errores en JSON con su status real, paginación en toda colección y únicamente los campos que las tools proyectan. Lo que queda en el MCP es la traducción *esencial* —de lenguaje natural a identificadores, y de datos a herramientas de trabajo—, que es donde está su valor.
 
-**Contrato independiente, reglas de negocio compartidas.** Es una fachada, no una segunda lógica de negocio. «Comisión disponible» se define **una sola vez** (una vista o función SQL única) y la usan tanto `/api` como `/api-mcp`. Dos definiciones de «vigente» conviviendo en el mismo CRM es exactamente lo que este diseño evita.
+**Contrato independiente, reglas de negocio compartidas.** Es una fachada, no una segunda lógica de negocio. `/api-mcp` usa **la regla de «comisión disponible» del catálogo del sitio** (por estado, no por fecha), en lugar de inventar una propia. El contraste con el CRM del 24/09/2026 mostró que hoy ya conviven **cuatro** predicados distintos de «disponible»: unificarlos es correcto, pero toca el sitio público y la inscripción, así que va **aparte** y no bloquea `/api-mcp` (decisión D3 de `DISENO-API-MCP.md` §8.2).
 
 **Además, `/api-mcp` es el lugar por donde entra la identidad:** lleva `X-Acting-Person` desde el primer día de diseño, para que el CRM aplique las reglas de datos de cada persona sin que el MCP tenga que reimplementarlas.
 
@@ -1228,7 +1228,7 @@ Implementación: `github.com/saberesterratecnologia/saberes-mcp` (privado), Type
 **1. `/api-mcp`: el endpoint dedicado**
 
 - [ ] Handler `/api-mcp` en el CRM con las acciones de datos (`cursos_disponibles`, `comision`, `buscar_comisiones`), todavía con token de servicio y sin `X-Acting-Person`
-- [ ] Definir **una sola vez** «comisión disponible» (vista o función SQL única, compartida con `/api`)
+- [ ] Usar la regla de «comisión disponible» del catálogo del sitio (por estado). La unificación de los cuatro predicados del CRM va aparte (decisión D3)
 - [ ] Migrar las tools del MCP a `/api-mcp` y **eliminar la capa de traducción accidental**
 
 **2. Identidad por persona — piloto con una persona**
