@@ -9,6 +9,7 @@
  * These are the R1–R4 rules of the design document, in one place.
  */
 
+import { ApiMcpError } from "./api-mcp-client.ts";
 import { SaberesApiError } from "./saberes-client.ts";
 
 /** The literal the CRM writes when a field has no value. */
@@ -139,31 +140,89 @@ export function toPositiveInteger(
 }
 
 /**
+ * The sentences shared by both clients.
+ *
+ * `/api` and `/api-mcp` fail for the same reasons, so the person must read the
+ * same explanation either way: which endpoint answered is an implementation
+ * detail of the migration, not something to relay.
+ */
+const AUTHENTICATION_FAILED =
+  "No pude autenticarme contra el sistema Saberes. El token de la integración no es válido o el cliente está desactivado. Avisale al equipo técnico; no es algo que puedas resolver desde acá.";
+const ACTION_NOT_ALLOWED =
+  "Esta integración no tiene permiso para esta consulta. El permiso se otorga en el CRM, por el equipo técnico.";
+const TIMEOUT =
+  "El sistema Saberes no respondió a tiempo. Puede ser algo pasajero: probá de nuevo en un momento.";
+const NETWORK_ERROR =
+  "No pude conectarme al sistema Saberes. Puede estar caído o haber un problema de red.";
+const SERVER_ERROR =
+  "El sistema Saberes falló al procesar la consulta. El error quedó registrado del lado del CRM para que lo revisen.";
+const UNINTERPRETABLE_ANSWER =
+  "El sistema Saberes respondió de una forma que no pude interpretar. Avisale al equipo técnico.";
+
+/**
  * Explains a failure in terms the agent can relay to a person.
  *
  * Each case is selected by the error's `kind`, never by matching message text.
+ * Both switches are exhaustive by construction: neither has a `default`, so a
+ * new kind on either client stops compiling here until it has its sentence.
  */
 export function describeFailure(error: unknown): string {
-  if (!(error instanceof SaberesApiError)) {
-    return "No pude hacer la consulta por un error inesperado del servidor MCP.";
-  }
+  if (error instanceof ApiMcpError) return describeApiMcpFailure(error);
+  if (error instanceof SaberesApiError) return describeSaberesFailure(error);
+  return "No pude hacer la consulta por un error inesperado del servidor MCP.";
+}
+
+/** The legacy `/api` client, kept until the tools finish migrating. */
+function describeSaberesFailure(error: SaberesApiError): string {
   switch (error.kind) {
     case "authentication_failed":
-      return "No pude autenticarme contra el sistema Saberes. El token de la integración no es válido o el cliente está desactivado. Avisale al equipo técnico; no es algo que puedas resolver desde acá.";
+      return AUTHENTICATION_FAILED;
     case "action_not_allowed":
-      return "Esta integración no tiene permiso para esta consulta. El permiso se otorga en el CRM, por el equipo técnico.";
+      return ACTION_NOT_ALLOWED;
     case "timeout":
-      return "El sistema Saberes no respondió a tiempo. Puede ser algo pasajero: probá de nuevo en un momento.";
+      return TIMEOUT;
     case "network_error":
-      return "No pude conectarme al sistema Saberes. Puede estar caído o haber un problema de red.";
+      return NETWORK_ERROR;
     case "server_error":
-      return "El sistema Saberes falló al procesar la consulta. El error quedó registrado del lado del CRM para que lo revisen.";
+      return SERVER_ERROR;
     case "api_error":
       return "El sistema Saberes rechazó la consulta sin un motivo que pueda interpretar. Avisale al equipo técnico.";
     case "invalid_json":
     case "bad_request":
     case "method_not_allowed":
     case "unexpected_status":
-      return "El sistema Saberes respondió de una forma que no pude interpretar. Avisale al equipo técnico.";
+      return UNINTERPRETABLE_ANSWER;
+  }
+}
+
+/**
+ * The `/api-mcp` client, which can fail in two ways `/api` could not name: a
+ * resource that genuinely does not exist (a real 404 instead of an empty
+ * envelope), and a contract that moved under us.
+ */
+function describeApiMcpFailure(error: ApiMcpError): string {
+  switch (error.kind) {
+    case "authentication_failed":
+      return AUTHENTICATION_FAILED;
+    case "action_not_allowed":
+      return ACTION_NOT_ALLOWED;
+    case "timeout":
+      return TIMEOUT;
+    case "network_error":
+      return NETWORK_ERROR;
+    case "server_error":
+      return SERVER_ERROR;
+    case "not_found":
+      // Deliberately generic: the client knows what it asked for, but this
+      // layer does not, and inventing the subject would be worse than saying
+      // plainly that it is not there.
+      return "No encontré lo que pediste en el sistema Saberes.";
+    case "contract_changed":
+      return "El sistema Saberes cambió la forma de sus respuestas y no puedo interpretarlas con seguridad. Avisale al equipo técnico.";
+    case "invalid_json":
+    case "bad_request":
+    case "method_not_allowed":
+    case "unexpected_status":
+      return UNINTERPRETABLE_ANSWER;
   }
 }

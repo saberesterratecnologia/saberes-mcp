@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { ApiMcpError } from "./api-mcp-client.ts";
 import { SaberesApiError } from "./saberes-client.ts";
 import {
   describeFailure,
@@ -144,6 +145,73 @@ test("an error envelope is explained as a rejection, not as an odd answer", () =
     envelope,
     describeFailure(new SaberesApiError("unexpected_status", "internal detail", 418)),
   );
+});
+
+test("every /api-mcp failure kind gets its own explanation, chosen by kind", () => {
+  const kinds = [
+    "authentication_failed",
+    "action_not_allowed",
+    "bad_request",
+    "not_found",
+    "method_not_allowed",
+    "server_error",
+    "unexpected_status",
+    "invalid_json",
+    "contract_changed",
+    "timeout",
+    "network_error",
+  ] as const;
+
+  for (const kind of kinds) {
+    const text = describeFailure(new ApiMcpError(kind, "internal detail"));
+    assert.ok(text.length > 0, kind);
+    assert.ok(!text.includes("internal detail"), kind);
+    // The fallback sentence is for failures that are not the API's.
+    assert.ok(!text.includes("error inesperado del servidor MCP"), kind);
+  }
+});
+
+test("a missing resource is explained as such, without inventing a reason", () => {
+  const text = describeFailure(new ApiMcpError("not_found", "detail", 404));
+
+  assert.match(text, /No encontr/);
+  // It must not read like a failure the person could retry or escalate.
+  assert.notEqual(
+    text,
+    describeFailure(new ApiMcpError("server_error", "detail", 500)),
+  );
+});
+
+test("a changed contract asks for the technical team, not for a retry", () => {
+  const text = describeFailure(
+    new ApiMcpError("contract_changed", "issue at data.0.organizacion", 200),
+  );
+
+  assert.match(text, /cambi\u00f3 la forma de sus respuestas/);
+  assert.match(text, /equipo t\u00e9cnico/);
+  assert.ok(!text.includes("data.0.organizacion"));
+});
+
+test("the shared kinds read the same on both clients", () => {
+  const shared = [
+    "authentication_failed",
+    "action_not_allowed",
+    "timeout",
+    "network_error",
+    "server_error",
+    "invalid_json",
+    "bad_request",
+    "method_not_allowed",
+    "unexpected_status",
+  ] as const;
+
+  for (const kind of shared) {
+    assert.equal(
+      describeFailure(new ApiMcpError(kind, "detail")),
+      describeFailure(new SaberesApiError(kind, "detail")),
+      kind,
+    );
+  }
 });
 
 test("a non-API failure still produces a sentence, not a crash", () => {
