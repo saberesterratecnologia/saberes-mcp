@@ -68,6 +68,20 @@ Max la charló con el equipo: **la opción B (LibreChat) gustó, pero no ahora**
 - Toda escritura del MVP requiere confirmación humana explícita antes de ejecutarse, es reversible
   (sin borrados), idempotente y queda auditada por rol.
 
+## Cómo es el MVP (decidido por Max, 24/09/2026)
+
+- **App:** ChatGPT, con la cuenta compartida. Como ChatGPT solo acepta MCP remoto por HTTPS con
+  OAuth o sin autenticación, el MVP necesita el transporte HTTPS y el login OAuth del paso 2 de
+  `DISENO-API-MCP.md` §7. **Sin login no se publica.**
+- **Login:** con el **usuario del CRM de quien conecta el conector**. El rol y los permisos salen
+  de sus privilegios `MCP · …`.
+- **Consecuencia que la auditoría tiene que decir en voz alta:** mientras la cuenta sea compartida,
+  todas las personas que la usan operan como quien conectó. El registro muestra ese nombre como
+  **"conexión autorizada por"**, nunca como autor de cada acción, y los reportes lo presentan como
+  identidad del rol/área. Si otra persona reconecta, el cambio de autorización queda registrado.
+- **Acciones:** las de lectura que ya existen (`listar_cursos`, `buscar_comision`,
+  `detalle_comision`). Las de escritura las define Max después, con los límites de arriba.
+
 ## Cuándo se revisa
 
 Antes de cualquiera de estas cosas, la identidad por persona deja de ser opcional:
