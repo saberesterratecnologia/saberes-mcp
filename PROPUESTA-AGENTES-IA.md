@@ -920,7 +920,7 @@ Además se registran los eventos de autorización: concesión otorgada, token re
 
 **El dashboard lo consume el CRM, y va al final.** Sale de `MCP_AUDITORIA` cruzado con nombres y roles del CRM: uso por persona, tool y día; denegaciones; errores; latencia; personas con volumen anómalo de resultados. **No se usa Grafana**: sumar una herramienta de monitoreo aparte no se justifica, y el CRM ya es donde el equipo mira.
 
-> ⚠️ **Límite honesto de esta auditoría:** el MCP ve **llamadas a tools, no conversaciones**. No sabe qué le preguntaron al modelo ni qué respondió. Auditar conversaciones depende de la app de chat (función de los planes Team / Enterprise) y es un criterio más para elegirla.
+> ⚠️ **Límite honesto de esta auditoría:** el MCP ve **llamadas a tools, no conversaciones**. No sabe qué le preguntaron al modelo ni qué respondió. Auditar conversaciones depende de la app de chat y **solo lo ofrecen los planes Enterprise** de cada proveedor; Team/Business no lo incluyen (verificado el 24/09/2026).
 
 > 📄 Campos completos, sanitización, retención y dashboard: **`DISENO-API-MCP.md` §3 y §5**.
 
@@ -1447,7 +1447,7 @@ Sin costo de infraestructura, cualquier ahorro de tiempo ya deja el proyecto en 
 5. **¿Qué app de chat, Claude o ChatGPT?**
    - Recomendación: Claude. Verificado el 24/09/2026: los conectores remotos propios están en Free, Pro, Max, Team y Enterprise; en Team/Enterprise solo los Owners los agregan y **cada persona se autentica individualmente**
    - Descartado: ChatGPT Plus — no soporta conectores custom
-   - **Criterio nuevo de la v2.6:** la **auditoría a nivel de conversación depende de la app**, no del MCP. El MCP registra llamadas a tools; qué se le preguntó al modelo solo queda registrado si la app lo provee (función de los planes Team / Enterprise). Si dirección quiere ese nivel de trazabilidad, la elección de app deja de ser solo preferencia
+   - **Criterio nuevo de la v2.6:** la **auditoría a nivel de conversación depende de la app**, no del MCP. El MCP registra llamadas a tools; qué se le preguntó al modelo solo queda registrado si la app lo provee, y eso es función de los planes **Enterprise** (Team/Business no lo incluyen; verificado el 24/09/2026). Si dirección quiere ese nivel de trazabilidad, la elección de app deja de ser solo preferencia
 
 6. ~~¿Qué acciones entran en la lista blanca de Secretaría Académica?~~ — **Resuelto: 4 acciones.** Ver [Área piloto](#secretaría-académica--⭐-área-piloto)
 

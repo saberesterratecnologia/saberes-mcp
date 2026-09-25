@@ -399,7 +399,7 @@ Un DNI en un parámetro **no se guarda en claro**. Se guarda `HMAC(secreto, dni)
 
 ### 5.4 Lo que la auditoría no ve
 
-El MCP ve **llamadas a tools**, no la conversación: no sabe qué le preguntaron al modelo ni qué respondió. Registrar conversaciones depende de la app de chat (auditoría de los planes Team / Enterprise). Es un criterio más para elegir la app.
+El MCP ve **llamadas a tools**, no la conversación: no sabe qué le preguntaron al modelo ni qué respondió. Registrar conversaciones depende de la app de chat y **solo lo ofrecen los planes Enterprise** (Claude Enterprise: audit logs y Compliance API; ChatGPT Enterprise: Compliance Logs Platform). Los planes Team/Business no lo incluyen (verificado el 24/09/2026).
 
 ### 5.5 Dónde se guarda
 
