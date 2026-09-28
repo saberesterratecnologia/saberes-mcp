@@ -75,3 +75,13 @@ las tools de lectura existentes; las de escritura las define Max después.
   green-cloud arranca la parte B en paralelo. **En espera:** Max saca nginx del repo de
   microservicios a un repo propio; la ruta del MCP se configura ahí después. Regla: el MCP escucha
   solo en 127.0.0.1. Pendiente: verificar si Cloudflare → nginx viaja cifrado.
+- **2026-09-28** — 🔴 **Bloqueante de publicación confirmado** (green-cloud, addendum del análisis):
+  (1) Cloudflare → nginx `:8443` viaja en **HTTP plano** (modo SSL "Flexible", deducido del
+  `access.log`: tráfico desde 162.158.0.0/15 a un puerto sin TLS); (2) el origen es **alcanzable
+  directo por IP** salteando Cloudflare, con escaneo de terceros visible en el log. El login OAuth
+  del MVP no se publica así. (3) Corrección: nginx **sí** tiene `http_ssl_module` (OpenSSL 3.5.4).
+  Solución propuesta, sin tocar el firewall: nginx termina TLS con un Cloudflare Origin Certificate,
+  modo **Full (strict)** **solo para `utils`**, y **Authenticated Origin Pulls** en nginx
+  (`ssl_verify_client`), que corta el acceso directo por IP. Encaja con la mudanza de nginx a su
+  repo. Pendiente de Max: revisar el panel de Cloudflare (modo SSL, Origin Server/AOP, Origin
+  Rules de `utils`, plan).
