@@ -66,3 +66,12 @@ las tools de lectura existentes; las de escritura las define Max después.
     implementar el servidor de autorización desde cero. Acá no aplica tal cual: la identidad sale
     del login del CRM y la contraseña solo la ve el CRM. Mitigación: usar las piezas de auth del SDK
     oficial, el alcance mínimo (código + PKCE + refresh) y la revisión de seguridad de T7.
+- **2026-09-25** — T2 (análisis de green-cloud, en su worktree:
+  `documentacion/analisis/2026-09-25-publicar-mcp-por-https.md`): todo el HTTPS lo termina
+  Cloudflare; IIS solo tiene :80; hay un Cloudflare Origin Certificate para
+  `*.institutoterra.com.ar` que vence en 2040. **Firewall de Windows apagado**: verificado desde
+  afuera por IPv4, abiertos 22, 80, 1433, 3389, 8080, 8443. **Decisiones de Max:** no tocar el
+  firewall por ahora (riesgo aceptado, en `decisiones/`); publicar vía el nginx existente en `utils`;
+  green-cloud arranca la parte B en paralelo. **En espera:** Max saca nginx del repo de
+  microservicios a un repo propio; la ruta del MCP se configura ahí después. Regla: el MCP escucha
+  solo en 127.0.0.1. Pendiente: verificar si Cloudflare → nginx viaja cifrado.

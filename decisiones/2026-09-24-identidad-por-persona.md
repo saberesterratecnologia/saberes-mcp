@@ -82,6 +82,20 @@ Max la charló con el equipo: **la opción B (LibreChat) gustó, pero no ahora**
 - **Acciones:** las de lectura que ya existen (`listar_cursos`, `buscar_comision`,
   `detalle_comision`). Las de escritura las define Max después, con los límites de arriba.
 
+## Publicación y riesgo aceptado (Max, 25/09/2026)
+
+- **Publicación:** el MCP se expone por el **nginx existente, en el dominio `utils`**, detrás de
+  Cloudflare. Max va a sacar nginx del repo de microservicios a un repo propio **antes** de seguir;
+  la configuración de la ruta del MCP se hace sobre ese repo nuevo.
+- **Firewall:** el relevamiento del 25/09 mostró el firewall de Windows **apagado** y, verificado
+  desde afuera por IPv4, abiertos a internet 22, 80, **1433 (SQL Server)**, **3389 (RDP)**, 8080 y
+  8443. Max decidió **no tocarlo por ahora**. Riesgo aceptado, registrado acá.
+- **Regla que esto impone al MCP:** el proceso escucha **solo en `127.0.0.1`**; a internet llega
+  únicamente vía nginx. Nunca `0.0.0.0`.
+- **Pendiente antes de publicar:** verificar si el tramo Cloudflare → nginx viaja cifrado. nginx
+  escucha en 8443 sin TLS; si ese tramo es HTTP, los códigos de autorización y los tokens del login
+  cruzarían internet en texto plano. Si es así, se corrige antes de publicar.
+
 ## Cuándo se revisa
 
 Antes de cualquiera de estas cosas, la identidad por persona deja de ser opcional:
